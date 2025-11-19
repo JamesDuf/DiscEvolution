@@ -41,9 +41,9 @@ Central to any protplanetary disc is a star, or perhaps binary star. The star cl
 A wrapper around the <mark>radial grid structure</mark> used in the code, which specifies key properties such as the cell edges, centres and sizes.
 
 #### Equation of State
-The equation of state (eos) module contains classes that handle the disc's temperature structure. They can be used to find the disc's temperature, pressure scale-height, sound speed, viscosity etc. The code currently includes two equations of state:
+The equation of state (eos) module contains classes that handle the disc's temperature structure. They can be used to find the disc's <mark>temperature, pressure scale-height, sound speed, viscosity</mark> etc. The code currently includes two equations of state:
 
-- LocallyIsothermalEOS: A simple power law equation of state in which the sound speed is set by a power-law that does not evolve.
+- LocallyIsothermalEOS: A simple power law equation of state in which the sound speed is set by a <mark>power-law that does not evolve.</mark>
 - IrradiatedEOS: Sets the temperature by computing the local balance between heating by stellar radiation and viscous stress along with cooling, following Hueso & Guillot (2005). The cooling rates are require computing the optical depth, currently the Bell & Lin (1994) type opacity of Zhu, Nelson & Gammie (2012) (which assumes a constant dust-to-gas ratio) or dust opacity of Tazzari et al. (2016) is used 
 
 #### Disc
@@ -55,7 +55,7 @@ The disc class is a wrapper around the intrinsic properties of the disc, such as
 Solves for the evolution of the surface density driven by the disc's viscosity
 
 #### Single Fluid Drift
-Updates the dust fraction according to radial drift (and optionally diffusion).
+<mark>Updates the dust fraction</mark> according to radial drift (and optionally diffusion).
 
 #### Diffusion
 Solves the for the evolution of the concentration of trace species via diffusion.
