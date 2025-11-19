@@ -3,7 +3,7 @@ A python code to model the evolution of dust and gas in protoplanetary discs.
 
 Author: Richard Booth
 
-This code contains a set of modules to simulate the viscous evolution of protoplanetary discs over Myr
+This code contains a set of modules to simulate the viscous evolut ion of protoplanetary discs over Myr
 time scales. This includes modules to compute the viscous evolution, grain growth, radial drift,
 thermal structure, transport of volatiles and planet formation. 
 
@@ -35,10 +35,10 @@ In addition to the physics, there are a number of core classes upon which the ph
 These core classes represent the essential components needed for modelling an accretion disc
 
 #### Star
-Central to any protplanetary disc is a star, or perhaps binary star. The star classes handle the mass, radius and effective stellar temperature, which may evolve with time.
+Central to any protplanetary disc is a star, or perhaps binary star. The star classes handle the <mark>mass, radius and effective stellar temperature,</mark> which may evolve with time.
 
 #### Grid
-A wrapper around the radial grid structure used in the code, which specifies key properties such as the cell edges, centres and sizes.
+A wrapper around the <mark>radial grid structure</mark> used in the code, which specifies key properties such as the cell edges, centres and sizes.
 
 #### Equation of State
 The equation of state (eos) module contains classes that handle the disc's temperature structure. They can be used to find the disc's temperature, pressure scale-height, sound speed, viscosity etc. The code currently includes two equations of state:
