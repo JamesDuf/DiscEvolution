@@ -11,7 +11,8 @@
     "mass"    : 0.01,
     "Rc"      : 100.0,
     "d2g"     : 0.01,
-    "Schmidt" : 1.0
+    "Schmidt" : 1.0,
+    "gamma": 1.0
   },
   
   "coagulation" : {
@@ -29,10 +30,6 @@
     "gsd" : "MRN",
     "gsd_params" : {}
   },
-    
-  "planets" : [
-    {"Mp" : 1, "ap" : 60}
-  ],
   
   "chemistry" : {
     "on"   : false, 

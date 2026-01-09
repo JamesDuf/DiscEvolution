@@ -510,7 +510,7 @@ class DiscEvolutionDriver(object):
                 head += p.ASCII_header()
 
         # Write it all to disc
-        io.dump_ASCII(filename, self._disc, self.t, head)
+        io.dump_ASCII(filename, self._disc, self.t, head, gas=self._gas) #io.dump_ASCII(filename, self._disc, self.t, head)
 
     def dump_hdf5(self, filename):
         """Write the current state in HDF5 format, with header information"""

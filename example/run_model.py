@@ -515,7 +515,7 @@ def _plot_grid(model, figs=None):
 
     return [f, subs]
 
-def run(model, io, base_name, restart, verbose=True, n_print=100, chem_sub=1):
+def run(model, io, base_name, restart, verbose=True, n_print=100, chem_sub=1): #model = 'driver'
 
     if restart:
         # Skip evolution already completed

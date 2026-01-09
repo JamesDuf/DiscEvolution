@@ -12,7 +12,7 @@ import numpy as np
 
 class Grid(object):
     """Construct a simple 1D grid with different spacings"""
-    def __init__(self, R0, R1, N, spacing='log'):
+    def __init__(self, R0, R1, N, spacing='log') -> None:
 
         if spacing == 'log':
             self._setup_log(R0, R1, N)
