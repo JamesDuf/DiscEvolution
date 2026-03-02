@@ -993,6 +993,48 @@ class TypeIMigration(object):
                   _cr_entr(alpha, beta, g_eff) * np.sqrt((1-Knu)*(1-KXi)))
 
         return norm*torque
+    
+    def compute_torque_raw(self, Rp, Mp):
+        """Compute the torques acting on a planet driving Type I migration"""
+        disc = self._disc
+        star = disc.star
+        
+        # Interpolate the disc properties
+        lgR = np.log(Rp)
+        alpha = -self._dlgSig(lgR)
+        beta  = -self._dlgT(lgR)
+
+        h     = disc.interp(Rp, disc.H) / Rp
+        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        Pr    = disc.interp(Rp, disc.Pr)
+
+        Om_k = star.Omega_k(Rp)
+        
+        Xi = nu/Pr
+        Q = 2*Xi/(3*h*h*h*Rp*Rp*Om_k)
+        g_eff = self.gamma_eff_tab(Q)
+        
+        q_h = (Mp*Mearth/(star.M*Msun)) / h
+
+        jp = Om_k*Rp*Rp
+        
+        # Compute the scaling factors
+        k = jp / (2*np.pi * nu)
+        x = (1.1 / g_eff**0.25) * np.sqrt(q_h)
+
+        pnu = 2*np.sqrt(k*x*x*x)/3
+        pXi = 3*pnu*np.sqrt(Pr)/2
+
+        Fnu, Gnu, Knu = _F(pnu), _G(pnu), _K(pnu)
+        FXi, GXi, KXi = _F(pXi), _G(pXi), _K(pXi)
+        
+        torque = (_linblad(alpha, beta) +
+                  _hs_baro(alpha) * Fnu * Gnu +
+                  _cr_baro(alpha) * (1 - Knu) +
+                  _hs_entr(alpha, beta, g_eff) * Fnu * FXi * np.sqrt(Gnu*GXi) +
+                  _cr_entr(alpha, beta, g_eff) * np.sqrt((1-Knu)*(1-KXi)))
+
+        return torque
 
     def migration_rate(self, Rp, Mp):
         """Migration rate, dRdt, of the planet according to Paardekooper et al (2011)"""
