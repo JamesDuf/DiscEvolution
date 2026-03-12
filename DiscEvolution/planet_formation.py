@@ -1035,6 +1035,38 @@ class TypeIMigration(object):
                   _cr_entr(alpha, beta, g_eff) * np.sqrt((1-Knu)*(1-KXi)))
 
         return torque
+    
+    def compute_torque_components_raw(self, Rp, Mp):
+        """Returns (Gamma_L, Gamma_C) — Lindblad and total corotation torques."""
+        disc, star = self._disc, self._disc.star
+        lgR   = np.log(Rp)
+        alpha = -self._dlgSig(lgR)
+        beta  = -self._dlgT(lgR)
+        h     = disc.interp(Rp, disc.H) / Rp
+        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        Pr    = disc.interp(Rp, disc.Pr)
+        Om_k  = star.Omega_k(Rp)
+
+        Xi    = nu / Pr
+        Q     = 2*Xi / (3*h**3 * Rp**2 * Om_k)
+        g_eff = self.gamma_eff_tab(Q)
+        q_h   = (Mp * Mearth / (star.M * Msun)) / h
+        jp    = Om_k * Rp**2
+
+        k   = jp / (2*np.pi * nu)
+        x   = (1.1 / g_eff**0.25) * np.sqrt(q_h)
+        pnu = 2*np.sqrt(k*x**3)/3
+        pXi = 3*pnu*np.sqrt(Pr)/2
+
+        Fnu, Gnu, Knu = _F(pnu), _G(pnu), _K(pnu)
+        FXi, GXi, KXi = _F(pXi), _G(pXi), _K(pXi)
+
+        Gamma_L = _linblad(alpha, beta)
+        Gamma_C = (_hs_baro(alpha)*Fnu*Gnu + _cr_baro(alpha)*(1 - Knu) +
+                _hs_entr(alpha, beta, g_eff)*Fnu*FXi*np.sqrt(Gnu*GXi) +
+                _cr_entr(alpha, beta, g_eff)*np.sqrt((1-Knu)*(1-KXi)))
+
+        return Gamma_L, Gamma_C
 
     def migration_rate(self, Rp, Mp):
         """Migration rate, dRdt, of the planet according to Paardekooper et al (2011)"""
