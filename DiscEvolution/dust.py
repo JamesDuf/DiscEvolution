@@ -382,6 +382,7 @@ class DustGrowthTwoPop(DustyDisc):
 
         # MLB Oct 30, 2025:  Corrected to self._eos._alpha_t from self.alpha
         # alpha = self.alpha/self.Sc
+        #alpha = self.alpha/self.Sc
         alpha=self._eos._alpha_t/self.Sc
 
         a0  = 8 * self.Sigma / (np.pi * self._rho_s) * self.Re**-0.25
@@ -432,7 +433,6 @@ class DustGrowthTwoPop(DustyDisc):
         # MLB Oct 31, 2025: correction to be consistent with Drazkowska growth rate.
         # Bugfix Jan 9 as I'd forgotten the factor 1e-4 in the growth time-scale.
         ad = ad * ((self._eos._alpha_t/1.e-4)/self.R)**(1./3.)
-
         # Radial drift-driven fragmentation:
         cs = self.cs
         St_d = 2 * (self._uf/cs) / (gamma*h + 1e-300)
