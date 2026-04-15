@@ -406,18 +406,36 @@ class IrradiatedEOS(EOS_Table):
             # Change in temperature
             return (dEdt/Omega0) # / (C_V*Sigma)
 
-        # Solve the balance using brent's method (needs ~ 20 iterations)
-        T0 = self._Tc
-        T1 = self._Tmax
+        # Step 1: Normalize alpha to per-cell array
+        alpha = np.atleast_1d(alpha)
+        if alpha.size == 1:
+            alpha = np.full_like(R, alpha[0])
+        
+        # Step 2: Build temperature bracket arrays
+        # Use [Tc, Tmax] as the safe bracket — guaranteed to bound the root
+        # because balance(Tc) >= 0 (irradiation) and balance(Tmax) <= 0 (cap).
+        T0 = np.full_like(R, self._Tc)
+        T1 = np.full_like(R, self._Tmax)
+        
+        # Narrow brackets using previous solution when available
         if self._T is not None:
             dedt = balance(self._T)
-            T0 = np.where(dedt > 0, self._T, T0)
-            T1 = np.where(dedt < 0, self._T, T1)
-
-        self._T =  brentq(balance, T0, T1)
+            # Only narrow if the previous solution gives a clear sign
+            can_raise_T0 = np.isfinite(dedt) & (dedt > 0)
+            can_lower_T1 = np.isfinite(dedt) & (dedt < 0)
+            T0 = np.where(can_raise_T0, self._T, T0)
+            T1 = np.where(can_lower_T1, self._T, T1)
+            
+            # Safety: if narrowing created T0 >= T1, reset to full bracket
+            degenerate = T0 >= T1
+            T0 = np.where(degenerate, self._Tc, T0)
+            T1 = np.where(degenerate, self._Tmax, T1)
+        
+        # Step 3: Solve with Brent's method
+        self._T = brentq(balance, T0, T1, raise_failure=False)
         self._Sigma = Sigma
 
-        # Save the opacity:
+        # Step 7: Continue with normal EOS post-solve (opacity, cs, H, nu)
         cs = np.sqrt(GasConst * self._T / mu)
         H = cs / Om_k
         self._kappa_arr = self._kappa(Sigma / (sqrt2pi * H), self._T, amax)

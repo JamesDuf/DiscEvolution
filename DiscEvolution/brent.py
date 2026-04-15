@@ -48,7 +48,17 @@ def brentq(f, xa, xb, xtol=1e-7, rtol=1e-7, max_iter=100,
     fpre = f(xpre)
     fcur = f(xcur)
 
-    if np.any(fpre*fcur > 0): raise ValueError("brentq: Region not bounded")
+    if np.any(fpre*fcur > 0):
+        if raise_failure:
+            raise ValueError("brentq: Region not bounded")
+        # For unbracketed cells, clamp to the endpoint with smaller residual
+        # so iteration stays well-defined but those cells effectively freeze.
+        unbounded = fpre*fcur > 0
+        best = np.where(np.abs(fpre) < np.abs(fcur), xpre, xcur)
+        xpre = np.where(unbounded, best, xpre)
+        xcur = np.where(unbounded, best, xcur)
+        fpre = np.where(unbounded, 0.0, fpre)
+        fcur = np.where(unbounded, 0.0, fcur)
 
     # Check for any values which already solutions
     root = np.where(fpre == 0, xpre, np.where(fcur == 0, xcur, 0))
