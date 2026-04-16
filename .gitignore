@@ -12,4 +12,7 @@ __pycache__
 output/
 logs/
 data/
+Figs/
 .DS_Store
+BACKUP
+*.pkl

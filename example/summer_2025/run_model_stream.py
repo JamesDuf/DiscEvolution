@@ -730,31 +730,31 @@ def run_model(config):
         time_keeper.append(0)
 
     # Prepare plots
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    axes = axes.flatten()
+    # fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    # axes = axes.flatten()
     
     # find Mdot to display below
     vr = disc._gas.viscous_velocity(disc, Sigma)
     Mdot = disc.Mdot(vr[0])
         
     # display disk characteristics
-    plt.figtext(0.5, 0, f"Mdot={Mdot:.3e}, alpha={disc._eos._alpha_t:.3e}, Mtot={disc.Mtot()/Msun:.3e}, Rd={disc.RC():.3e}", ha="center")
+    # plt.figtext(0.5, 0, f"Mdot={Mdot:.3e}, alpha={disc._eos._alpha_t:.3e}, Mtot={disc.Mtot()/Msun:.3e}, Rd={disc.RC():.3e}", ha="center")
 
     # this is to synchronize colors
     d = 0 
 #    colors = ["black", "red", "green", "blue", "cyan"]
     nplanets = len(config["planets"]["Mp"])
-    colors = [cm.viridis(i / nplanets) for i in range(nplanets)]
+    # colors = [cm.viridis(i / nplanets) for i in range(nplanets)]
 
-    cm2 = plt.get_cmap("viridis")
-    # gradient colors also present to give options
-    color1=iter(plt.cm.Blues(np.linspace(0.4, 1, 10)[::-1]))
-    color2=iter(plt.cm.Greys(np.linspace(0.4, 1, 10)[::-1]))
-    color3=iter(plt.cm.Greens(np.linspace(0.4, 1, 10)[::-1]))
-    color4=iter(plt.cm.Reds(np.linspace(0.4, 1, 10)[::-1]))
+    # cm2 = plt.get_cmap("viridis")
+    # # gradient colors also present to give options
+    # color1=iter(plt.cm.Blues(np.linspace(0.4, 1, 10)[::-1]))
+    # color2=iter(plt.cm.Greys(np.linspace(0.4, 1, 10)[::-1]))
+    # color3=iter(plt.cm.Greens(np.linspace(0.4, 1, 10)[::-1]))
+    # color4=iter(plt.cm.Reds(np.linspace(0.4, 1, 10)[::-1]))
 
     # ========================
-    # Run model (Option A: JSON-like HDF5 streaming + figure generation)
+    # Run model (Option A: JSON-like HDF5 streaming)
     # ========================
     t = 0
     n = 0

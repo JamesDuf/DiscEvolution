@@ -11,6 +11,8 @@ from DiscEvolution.constants import *
 from DiscEvolution.disc import AccretionDisc
 from DiscEvolution.reconstruction import DonorCell, VanLeer
 from DiscEvolution.chemistry import SimpleCOMolAbund
+from scipy.signal import savgol_filter
+
 
 class DustyDisc(AccretionDisc):
     """Dusty accretion disc. Base class for an accretion disc that also
@@ -168,7 +170,7 @@ class DustyDisc(AccretionDisc):
         try:
             return self._v_drift
         except:
-            return np.zeros((3, len(self.Sigma)))
+            return np.zeros((2, len(self.Sigma)))
     
     @property
     def M_cr(self):
@@ -296,11 +298,13 @@ class DustGrowthTwoPop(DustyDisc):
         start_small:Whether to start at monomer size (True, default) or equilibrium (False)
         distribution_slope:
                     The slope d ln n(a) / d ln a of the number distribution with size (3.5 for MRN)
+        transition_factor:
+                    Factor controlling width of smooth transition between frag/drift regimes (default=2)
     """
     def __init__(self, grid, star, eos, eps, Sigma=None,
                  rho_s=1., Sc=1., uf_0=100., uf_ice=1e3, f_ice=1, thresh=0.1,
                  f_grow=1.0, a0=1e-5, amin=1e-5, f_drift=0.55, f_frag=0.37, feedback=True,
-                 start_small=True, distribution_slope=3.5, gas = None):
+                 start_small=True, distribution_slope=3.5, gas = None, transition_factor=2.0):
         super(DustGrowthTwoPop, self).__init__(grid, star, eos, Sigma, rho_s, Sc, feedback)
         
         self._uf_0   = uf_0 / (AU * Omega0)
@@ -311,6 +315,7 @@ class DustGrowthTwoPop(DustyDisc):
         self._ffrag  = f_frag * (2/(3*np.pi)) 
         self._fdrift = f_drift * (2/np.pi) / f_grow 
         self._fmass  = np.array([0.97, 0.75])
+        self._transition_factor = transition_factor
 
         # Initialize the dust distribution
         Ncells = self.Ncells
@@ -363,7 +368,9 @@ class DustGrowthTwoPop(DustyDisc):
         
     def _frag_limit(self):
         """Maximum particle size before fragmentation kicks in"""
-        alpha = self.alpha/self.Sc
+        #alpha = self.alpha/self.Sc
+        # MLB Oct 30, 2025:  Corrected to self._eos._alpha_t from self.alpha
+        alpha=self._eos._alpha_t/self.Sc
         af = (self.Sigma_G/(self._rho_s*alpha)) * (self._uf/self.cs)**2
         return self._ffrag * af
 
@@ -373,12 +380,16 @@ class DustGrowthTwoPop(DustyDisc):
         if eps_tot is None:
             eps_tot = self.dust_frac.sum(0)
 
-        alpha = self.alpha/self.Sc
+        # MLB Oct 30, 2025:  Corrected to self._eos._alpha_t from self.alpha
+        # alpha = self.alpha/self.Sc
+        #alpha = self.alpha/self.Sc
+        alpha=self._eos._alpha_t/self.Sc
 
         a0  = 8 * self.Sigma / (np.pi * self._rho_s) * self.Re**-0.25
         a0 *= np.sqrt(self.mu*m_H/(self._rho_s*alpha)) / (2*np.pi)
         return a0**0.4
         
+    # Original _gammaP implementation (finite differences - can be noisy)
     def _gammaP(self):
         """Dimensionless pressure gradient"""
         P = self.P
@@ -388,9 +399,27 @@ class DustGrowthTwoPop(DustyDisc):
         gamma[ 0]   = abs((P[ 1] - P[  0])/(R[ 1] - R[ 0]))
         gamma[-1]   = abs((P[-1] - P[ -2])/(R[-1] - R[-2]))
         gamma *= R/(P+1e-300)
-
         return gamma
+    
+    
+    def _gammaP_smooth(self):
+        """Dimensionless pressure gradient using Savitzky-Golay filtering.
         
+        Applies polynomial smoothing to the pressure profile before computing
+        the derivative. This preserves broad features while filtering noise.
+        
+        MLB implementation: Jan 12, 2026
+        """
+        
+        P = self.P
+        R = self.R
+        # Smooth P before differentiation (window=11, polynomial order=3)
+        # Adjust window_length if needed - must be odd and > polyorder
+        P_smooth = savgol_filter(P, window_length=11, polyorder=3, mode='nearest')
+        dP_dR = np.gradient(P_smooth, R)
+        gamma = np.abs(dP_dR) * R / (P + 1e-300)
+        return gamma
+
     def _drift_limit(self, eps_tot):
         """Maximum size due to drift limit or drift driven fragmentation"""
         gamma = self._gammaP()
@@ -401,7 +430,9 @@ class DustGrowthTwoPop(DustyDisc):
         # Radial drift time-scale limit
         h = self.H / self.R
         ad = self._fdrift * (Sigma_D/self._rho_s) / (gamma * h**2+1e-300)
-
+        # MLB Oct 31, 2025: correction to be consistent with Drazkowska growth rate.
+        # Bugfix Jan 9 as I'd forgotten the factor 1e-4 in the growth time-scale.
+        ad = ad * ((self._eos._alpha_t/1.e-4)/self.R)**(1./3.)
         # Radial drift-driven fragmentation:
         cs = self.cs
         St_d = 2 * (self._uf/cs) / (gamma*h + 1e-300)
@@ -410,10 +441,11 @@ class DustGrowthTwoPop(DustyDisc):
         return ad, af
 
     def _t_grow(self, eps=None):
+        # Booth:
+        #return 1 / (self.Omega_k * eps)
         "Slightly more realistic growth time-scale from Drazkowska et. al (2021)."
         Sigma_dust=self.Sigma_D[0]+self.Sigma_D[1]
-        #return (self.Sigma_G/(self.Sigma_D[1]*self._star.Omega_k(self._grid.Rc))) * (self._eos._alpha_t/1e-4)**(-1/3) * (self.grid.Rc)**(1/3) 
-        return (self.Sigma_G/(Sigma_dust*self._star.Omega_k(self._grid.Rc))) * (self._eos._alpha_t/1e-4)**(-1/3) * (self.grid.Rc)**(1/3) 
+        return (self.Sigma_G/((Sigma_dust+1.e-300)*self._star.Omega_k(self._grid.Rc))) * (self._eos._alpha_t/1e-4)**(-1/3) * (self.grid.Rc)**(1/3) 
 
     def do_grain_growth(self, dt):
         """Apply the grain growth"""
@@ -428,11 +460,15 @@ class DustGrowthTwoPop(DustyDisc):
         
         afrag = np.minimum(afrag_t, afrag_d)
         a0    = np.minimum(afrag, adrift)       # a0 is the lower of the maximum sizes
+   
 
         # Update the particle distribution
         #   Maximum size due to growth:
         if self._start_small:
-            amax = np.minimum(a0, a*np.exp(dt/t_grow))  # If dust grains start small (default) first have to grow)
+            # Suppress overflow warnings - when dt/t_grow is large, exp overflows to inf,
+            # and np.minimum(a0, inf) correctly gives a0 (the equilibrium size)
+            with np.errstate(over='ignore'):
+                amax = np.minimum(a0, a*np.exp(dt/t_grow))  # If dust grains start small (default) first have to grow)
         else:
             amax = a0                                   # Ignore possibility of being in growth phase
         #   Reduce size due to erosion / fragmentation if grains have grown
@@ -441,14 +477,26 @@ class DustGrowthTwoPop(DustyDisc):
         # ignore empty cells:
         ids = eps_tot > 0
         self._a[1, ids] = np.maximum(amax[ids], self._amin)
+                
+        #fm   = self._fmass[1*(afrag < adrift)]
+
+        # Update the mass-fractions in each population with smooth transition
+        # Use tanh-based smooth interpolation between frag (0.75) and drift (0.97) regimes
+        # Transition centered at afrag = adrift, spanning self._transition_factor in ratio
+        # Only compute log_ratio for cells with dust to avoid NaN warnings in empty cells
+        transition_width = np.log(self._transition_factor)
+        fm = np.full_like(eps_tot, self._fmass[1])  # Default to drift-dominated value
         
-        # Update the mass-fractions in each population
-        fm   = self._fmass[1*(afrag < adrift)]
+        if ids.any():  # Only compute if there are cells with dust
+            log_ratio = np.log((afrag[ids]+1.e-300) / (adrift[ids] + 1e-300))
+            smooth = 0.5 * (1 + np.tanh(log_ratio / transition_width))
+            fm[ids] = self._fmass[1] + (self._fmass[0] - self._fmass[1]) * smooth
+        
         self._fm[ids] = fm[ids]
         
         self._eps[0][ids] = ((1-fm)*eps_tot)[ids]
         self._eps[1][ids] = (   fm *eps_tot)[ids]
-
+ 
         # Set the average area:
         #self._area = np.pi * self.a_BT(eps_tot)**2
 
@@ -548,7 +596,55 @@ class PlanetesimalFormation(object):
     def _compute_planetesimal_mass(self, disc):
         """Compute the mass of a planetesimal."""
         disc._M_planetesimal = 4/3 * np.pi * (self._R_planetesimal ** 3) * self._rhos
+
     
+
+    def smooth_v(self, v, R, s_factor=1e-2):
+        from scipy.interpolate import UnivariateSpline
+
+        """
+        Smooth v(R) using a cubic smoothing spline.
+        The smoothing parameter s controls how much noise is removed.
+
+        Parameters
+        ----------
+        v : ndarray
+            Quantity to smooth.
+        R : ndarray
+            Radial grid (monotonic, can be nonuniform).
+        s_factor : float
+            Fraction of total variance to use as smoothing strength.
+            Increase for stronger smoothing (e.g. 1e-1); decrease for finer detail.
+
+        Returns
+        -------
+        v_smooth : ndarray
+            Smoothed version of v.
+        """
+        # Scale s by total number of points and variance for consistent behaviour
+        s = s_factor * len(R) * np.var(v)
+        spline = UnivariateSpline(R, v, s=s)
+        return spline(R)
+
+    def g_smooth_v(self, v, R, N=3, logspace=False):
+        from scipy.ndimage import gaussian_filter1d
+        """
+        Fast Gaussian smoothing of v over ~N grid cells.
+        Works best if R is monotonic and spacing is nearly uniform.
+        """
+        if logspace:
+            x = np.log(R)
+        else:
+            x = R
+
+        # Estimate pixel spacing for normalization
+        dx = np.median(np.diff(x))
+        sigma = N * dx / dx   # just N, kept explicit for clarity
+
+        # Use reflect mode to avoid edge artifacts
+        return gaussian_filter1d(v, sigma=N, mode='reflect')
+
+
     def compute_M_peb(self, v_drift, disc):
         """
         Compute the mass flux of pebbles.
@@ -568,12 +664,16 @@ class PlanetesimalFormation(object):
         St_0 = St[0]    # grains
         St_1 = St[1]    # pebbles
         
+        # Test if smoothing helps
         v_drift_0 = np.insert(v_drift[0], 0, 0)
         v_drift_1 = np.insert(v_drift[1], 0, 0)
         #v_drift_2 = np.insert(v_drift[2], 0, 0) # planetesimals don't move, not needed.
         
         v_drift_0[np.isnan(v_drift_0)] = 0
         v_drift_1[np.isnan(v_drift_1)] = 0
+
+        v_drift_0_smooth = self.g_smooth_v(v_drift_0, disc.R,N=10)
+        v_drift_1_smooth = self.g_smooth_v(v_drift_1, disc.R,N=10)
         #v_drift_2[np.isnan(v_drift_2)] = 0
         
         # Heaviside functions
@@ -586,11 +686,11 @@ class PlanetesimalFormation(object):
         else:
             theta_St_max_0 = np.heaviside(disc.St_max - St_0, 1.)
             theta_St_max_1 = np.heaviside(disc.St_max - St_1, 1.)
+        f1=2 * np.pi * disc.R * np.abs(v_drift_0) * Sigma_d[0] * theta_St_max_0 * theta_St_min_0
+        f2=2 * np.pi * disc.R * np.abs(v_drift_1) * Sigma_d[1] * theta_St_max_1 * theta_St_min_1
+        disc._M_peb.append(f1)
+        disc._M_peb.append(f2)
 
-        disc._M_peb.append(2 * np.pi * disc.R * np.abs(v_drift_0) * Sigma_d[0] * theta_St_max_0 * theta_St_min_0)
-        disc._M_peb.append(2 * np.pi * disc.R * np.abs(v_drift_1) * Sigma_d[1] * theta_St_max_1 * theta_St_min_1)
-        disc._M_peb = np.array(disc._M_peb)
-        
         disc._v_drift = np.array([v_drift_0, v_drift_1])
 
     def is_flux_critical(self, disc):
@@ -840,6 +940,9 @@ class SingleFluidDrift(object):
 
         # Compute the gas velocities due to pressure (with feedback):
         rho = disc.midplane_gas_density
+        # Smooth pressure before differentiation to reduce noise (MLB Jan 16, 2026)
+        #P_smooth = savgol_filter(disc.P, window_length=11, polyorder=3, mode='nearest')
+        #dPdr = np.diff(P_smooth) / disc.grid.dRc
         dPdr = np.diff(disc.P) / disc.grid.dRc
         eta = - dPdr / (0.5*(rho[1:] + rho[:-1] + 1e-300)*Om_kav)
 
@@ -876,7 +979,7 @@ class SingleFluidDrift(object):
         Parameters:
             disc: The disc object containing relevant properties.
             pla_eff: The planetesimal efficiency.
-            d: The particle size.
+            d: The distance between vortices.
             M_peb: The pebble mass flux.
         
         Returns:
@@ -890,7 +993,9 @@ class SingleFluidDrift(object):
         sink_term_1 = (pla_eff / d) * M_peb[1] / (2 * np.pi * disc.R) * disc.is_critical[1]
 
         # Convert to dust fraction when returning
-        return sink_term_0 / Sigma, sink_term_1 / Sigma
+        tiny = np.finfo(Sigma.dtype).tiny
+        Sigma_safe = np.maximum(Sigma, tiny)
+        return sink_term_0 / Sigma_safe, sink_term_1 / Sigma_safe
     
     def __call__(self, dt, disc, gas_tracers=None, dust_tracers=None, v_visc=None):
         """Apply the update for radial drift over time-step dt"""
@@ -937,7 +1042,10 @@ class SingleFluidDrift(object):
             if disc._planetesimal.ice_abund and (dust_tracers is not None):
                 # Find fraction of each dust species
                 tracer_total = dust_tracers.sum(axis=0)
-                species_frac = dust_tracers/tracer_total
+                tiny = np.finfo(dust_tracers.dtype).tiny
+                tracer_total_safe = np.maximum(tracer_total, tiny)
+                species_frac = dust_tracers / tracer_total_safe
+                species_frac[:, tracer_total <= tiny] = 0.0
 
                 # Apply change in species dust fraction to dust tracers
                 dust_tracers[:] -= species_frac * (L0*dt + L1*dt)
@@ -965,7 +1073,7 @@ class SingleFluidDrift(object):
 
     def radial_drift_velocity(self, disc, v_visc=None, ret_vphi=False):
         """
-        Compute the radial drift velocity for the disc and optionally the azimuthal velocity
+        Compute the radial drift velocity for the disc and optionally the azimuthal velocity.
         
         Parameters:
             disc: The disc object for which to compute the radial drift velocity.
@@ -975,8 +1083,14 @@ class SingleFluidDrift(object):
                 If False, the function returns only the radial drift velocity.
         
         Returns:
-            If ret_vphi is True, returns a tuple containing the radial drift velocity and the azimuthal velocity.
-            If ret_vphi is False, returns only the radial drift velocity.
+            DeltaV: Radial drift velocity in AU per code time unit (1 code time = 2π years).
+                Shape: (2, Ncells-1) for [grains, pebbles] at cell edges.
+                To convert to physical units:
+                    - velocity [cm/s] = velocity_code * (AU / (2*np.pi*yr))
+                    - velocity [AU/yr] = velocity_code / (2*np.pi)
+            
+            If ret_vphi is True, also returns:
+                DeltaVphi: Azimuthal velocity in AU per code time unit.
         """
         DeltaV = self._compute_deltaV(disc, v_visc)
         
