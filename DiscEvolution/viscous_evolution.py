@@ -345,7 +345,7 @@ class HybridWindModel(object):
     """Finite volume model for combined viscous evolution + winds
     
     args:
-       psi_DW    : Ratio of the viscous alpha to the turbulent one.
+       psi_DW    : Ratio of the wind alpha to the turbulent one.
        lambda_DW : Wind level arm parameter. Default=3
        tol       : Ratio of the time-step to the maximum stable one.
                    Default = 0.5
