@@ -33,6 +33,74 @@ plt.rcParams.update({'font.size': 16})
 
 gas_solver=ViscousEvolutionFV
 
+def compute_ice_lines(chem, grid, threshold=0.5):
+    """
+    Compute ice line radius for each molecular species.
+
+    Parameters:
+    -----------
+    chem : MolecularIceAbund
+        Chemistry object with gas and ice abundances for each species
+    grid : Grid
+        Grid object with Rc radial positions (in AU)
+    threshold : float
+        Condensation fraction threshold (0-1) to define ice line. Default=0.5
+
+    Returns:
+    --------
+    ice_lines : ndarray of shape (Nspec,)
+        Ice line radius (AU) for each species. NaN if no clear transition.
+    """
+    Nspec = chem.ice.Nspec
+    ice_lines = np.full(Nspec, np.nan)
+
+    for i, species in enumerate(chem.ice.names):
+        # Get gas and ice abundances for this species
+        ice_abund = chem.ice.data[i, :]
+        gas_abund = chem.gas.data[i, :]
+
+        # Compute ice fraction
+        total_abund = ice_abund + gas_abund
+
+        # Skip if total abundance is essentially zero everywhere
+        if np.max(total_abund) < 1e-300:
+            continue
+
+        ice_fraction = np.divide(ice_abund, total_abund,
+                                 where=total_abund > 0,
+                                 out=np.zeros_like(ice_abund))
+
+        # Check if there's a meaningful transition (not always 0 or 1)
+        min_frac = np.min(ice_fraction[total_abund > 0]) if np.any(total_abund > 0) else 0
+        max_frac = np.max(ice_fraction[total_abund > 0]) if np.any(total_abund > 0) else 0
+
+        # Skip if no transition (all gas or all ice)
+        if (max_frac - min_frac) < 0.1:
+            continue
+
+        # Find where ice_fraction crosses threshold
+        # Look for sign change in (ice_fraction - threshold)
+        crossing = np.diff(np.sign(ice_fraction - threshold))
+
+        # Find indices where crossing occurs
+        cross_idx = np.where(crossing != 0)[0]
+
+        if len(cross_idx) > 0:
+            # Use the first crossing (innermost ice line)
+            idx = cross_idx[0]
+
+            # Linear interpolation to find exact crossing point
+            f1, f2 = ice_fraction[idx], ice_fraction[idx + 1]
+            r1, r2 = grid.Rc[idx], grid.Rc[idx + 1]
+
+            # Interpolate radius where ice_fraction = threshold
+            if abs(f2 - f1) > 1e-10:
+                ice_lines[i] = r1 + (threshold - f1) / (f2 - f1) * (r2 - r1)
+            else:
+                ice_lines[i] = r1
+
+    return ice_lines
+
 def run_model(config, cli_output_dir=None):
     """
     Run the disk evolution model and plot the results.
@@ -493,6 +561,8 @@ def run_model(config, cli_output_dir=None):
             chemistry = SimpleCOChemOberg()
         elif chemistry_params["chem_model"] == "Equilibrium":
             chemistry = EquilibriumCOChemOberg(a=1e-5)
+        elif chemistry_params["chem_model"] == "Equilibrium_Fixed":
+            chemistry = EquilibriumCOChemOberg(a=1e-5,fix_ratios=True)
         elif chemistry_params["chem_model"] == "TimeDep":
             chemistry = TimeDepCOChemOberg(a=1e-5)
         else:
@@ -668,6 +738,9 @@ def run_model(config, cli_output_dir=None):
                 grp_Mdotp = h5f.create_group("disk_Mdot_p")
                 grp_Xc    = h5f.create_group("X_cores")
                 grp_Xe    = h5f.create_group("X_envs")
+                grp_ice_lines = h5f.create_group("ice_lines")
+                grp_M_transition = h5f.create_group("M_transition")
+                grp_M_iso = h5f.create_group("M_iso")
                 nchem_core = len(planets[0].X_core)
                 nchem_env  = len(planets[0].X_env)
                 for ip in range(nplanets):
@@ -675,6 +748,9 @@ def run_model(config, cli_output_dir=None):
                     grp_Mes.create_dataset(str(ip), shape=(0,), maxshape=(None,), dtype="f8", chunks=(1024,))
                     grp_Rp.create_dataset(str(ip), shape=(0,), maxshape=(None,), dtype="f8", chunks=(1024,))
                     grp_Mdotp.create_dataset(str(ip), shape=(0,), maxshape=(None,), dtype="f8", chunks=(1024,))
+                    grp_ice_lines.create_dataset(str(ip), shape=(0, Nmol), maxshape=(None, Nmol), dtype="f8", chunks=(1024, Nmol))
+                    grp_M_transition.create_dataset(str(ip), shape=(0,), maxshape=(None,), dtype="f8", chunks=(1024,))
+                    grp_M_iso.create_dataset(str(ip), shape=(0,), maxshape=(None,), dtype="f8", chunks=(1024,))
 
                     pgrp_c = grp_Xc.create_group(str(ip))
                     pgrp_e = grp_Xe.create_group(str(ip))
@@ -698,6 +774,7 @@ def run_model(config, cli_output_dir=None):
             h5f.create_dataset("disk_mol_gas_abund", shape=(0, Nmol, nR), maxshape=(None, Nmol, nR), dtype="f8")
             h5f.create_dataset("disk_atom_ice_abund", shape=(0, Natom, nR), maxshape=(None, Natom, nR), dtype="f8")
             h5f.create_dataset("disk_mol_ice_abund", shape=(0, Nmol, nR), maxshape=(None, Nmol, nR), dtype="f8")
+            h5f.create_dataset("disk_ice_lines", shape=(0, Nmol), maxshape=(None, Nmol), dtype="f8")
             if config["planetesimal"]["active"]:
                 h5f.create_dataset("Sigma_planetesimals", shape=(0, nR), maxshape=(None, nR), dtype="f8")
                 h5f.create_dataset("disk_planetesimal_atom_abund", shape=(0, Natom, nR), maxshape=(None, Natom, nR), dtype="f8")
@@ -742,6 +819,19 @@ def run_model(config, cli_output_dir=None):
                                 d = grp_Xe[str(ip)][str(js)]
                                 d.resize(1, axis=0)
                                 d[0] = env
+
+                        # Pebble accretion parameters
+                        if planet_model._peb_acc:
+                            M_transition = planet_model._peb_acc.M_transition(planet.R)
+                            M_iso = planet_model._peb_acc.M_iso(planet.R)
+
+                            d_mt = grp_M_transition[str(ip)]
+                            d_mt.resize(1, axis=0)
+                            d_mt[0] = M_transition
+
+                            d_iso = grp_M_iso[str(ip)]
+                            d_iso.resize(1, axis=0)
+                            d_iso[0] = M_iso
                 # Disk profiles
 
                 for name, arr in [
@@ -759,6 +849,14 @@ def run_model(config, cli_output_dir=None):
                     d = h5f[name]
                     d.resize(1, axis=0)
                     d[0, :] = arr
+
+                # Ice lines
+                if chemistry_params["on"]:
+                    ice_lines = compute_ice_lines(disc.chem, disc.grid, threshold=dust_growth_params['thresh'])
+                    d = h5f["disk_ice_lines"]
+                    d.resize(1, axis=0)
+                    d[0, :] = ice_lines
+
                 if config["planetesimal"]["active"]:
                     for name, arr in [
                         ("disk_planetesimal_atom_abund", disc._planetesimal.ice_abund.atomic_abundance().data if chemistry_params["on"] else np.zeros((Natom, nR))),
@@ -1041,7 +1139,7 @@ def run_model(config, cli_output_dir=None):
                         h5f["Tc"][k] = disc.T[0]
                         h5f["Sigc"][k] = disc.Sigma[0]
 
-                        for ip, planet in enumerate(planets):                
+                        for ip, planet in enumerate(planets):
                             for name, val, grp in [
                                 ("Mcs", planet.M_core.copy(), grp_Mcs),
                                 ("Mes", planet.M_env.copy(), grp_Mes),
@@ -1052,6 +1150,19 @@ def run_model(config, cli_output_dir=None):
                                 d.resize(d.shape[0] + 1, axis=0)
                                 d[-1] = val
 
+                            # Pebble accretion parameters
+                            if planet_model._peb_acc:
+                                M_transition = planet_model._peb_acc.M_transition(planet.R)
+                                M_iso = planet_model._peb_acc.M_iso(planet.R)
+
+                                d_mt = grp_M_transition[str(ip)]
+                                d_mt.resize(d_mt.shape[0] + 1, axis=0)
+                                d_mt[-1] = M_transition
+
+                                d_iso = grp_M_iso[str(ip)]
+                                d_iso.resize(d_iso.shape[0] + 1, axis=0)
+                                d_iso[-1] = M_iso
+
                             if chemistry_params["on"]:
                                 for js, chem in enumerate(planet.X_core):
                                     d = grp_Xc[str(ip)][str(js)]
@@ -1061,6 +1172,12 @@ def run_model(config, cli_output_dir=None):
                                     d = grp_Xe[str(ip)][str(js)]
                                     d.resize(d.shape[0] + 1, axis=0)
                                     d[-1] = env
+
+                                # Ice lines for this planet
+                                ice_lines = compute_ice_lines(disc.chem, disc.grid, threshold=dust_growth_params['thresh'])
+                                d = grp_ice_lines[str(ip)]
+                                d.resize(d.shape[0] + 1, axis=0)
+                                d[-1, :] = ice_lines
 
                 # --- after while loop, once per ti: snapshot disk profiles ---
 
@@ -1075,6 +1192,12 @@ def run_model(config, cli_output_dir=None):
                     h5f["disk_mol_gas_abund"].resize(s + 1, axis=0);   h5f["disk_mol_gas_abund"][s, :, :]  = disc.chem.gas.data
                     h5f["disk_atom_ice_abund"].resize(s + 1, axis=0);  h5f["disk_atom_ice_abund"][s, :, :] = disc.chem.ice.atomic_abundance().data
                     h5f["disk_mol_ice_abund"].resize(s + 1, axis=0);   h5f["disk_mol_ice_abund"][s, :, :]  = disc.chem.ice.data
+
+                    # Ice lines
+                    ice_lines = compute_ice_lines(disc.chem, disc.grid, threshold=dust_growth_params['thresh'])
+                    h5f["disk_ice_lines"].resize(s + 1, axis=0)
+                    h5f["disk_ice_lines"][s, :] = ice_lines
+
                     if config["planetesimal"]["active"]:
                         h5f["disk_planetesimal_atom_abund"].resize(s + 1, axis=0); h5f["disk_planetesimal_atom_abund"][s, :, :] = disc._planetesimal.ice_abund.atomic_abundance().data
                         h5f["disk_planetesimal_mol_abund"].resize(s + 1, axis=0);  h5f["disk_planetesimal_mol_abund"][s, :, :]  = disc._planetesimal.ice_abund.data
