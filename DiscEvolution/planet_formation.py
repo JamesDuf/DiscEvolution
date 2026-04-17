@@ -959,7 +959,7 @@ class TypeIMigration(object):
 
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi))
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
@@ -1006,7 +1006,7 @@ class TypeIMigration(object):
         beta  = -self._dlgT(lgR)
 
         h     = disc.interp(Rp, disc.H) / Rp
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi))
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
@@ -1044,7 +1044,7 @@ class TypeIMigration(object):
         alpha = -self._dlgSig(lgR)
         beta  = -self._dlgT(lgR)
         h     = disc.interp(Rp, disc.H) / Rp
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi))
         Pr    = disc.interp(Rp, disc.Pr)
         Om_k  = star.Omega_k(Rp)
 
@@ -1106,7 +1106,7 @@ class TypeIIMigration(object):
         disc = self._disc
         
         Sigma = disc.interp(Rp, disc.Sigma)
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi))
 
         Sigma *= AU**2/Mearth
 
@@ -1146,7 +1146,7 @@ class PlanetMigration(object):
         if not winds:
             # ViscousEvolution classes do not assign a psi value,
             # so assign one here to not error in migration calculations.
-            disc._gas._psi = 0
+            disc._gas.psi = 0
 
         self._typeI  = TypeIMigration(disc, gamma=gamma)
         self._typeII = TypeIIMigration(disc)
@@ -1181,7 +1181,7 @@ class PlanetMigration(object):
         Me = Mp*Mearth/Msun
         q = Me / star.M
         rH = star.r_Hill(Rp, Mp)
-        nu = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        nu = disc.interp(Rp, disc.nu * (1 + disc._gas.psi))
     # For testing
         #nu = disc.interp(Rp, disc.nu)
 

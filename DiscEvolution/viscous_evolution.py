@@ -359,8 +359,9 @@ class HybridWindModel(object):
                      'Mdot_out'  : Constant Mdot, for tail of LBP.
 
     Notes :
-       The alpha provided by the disc model is assumed to be the total alpha, i.e.
-       the viscous + disk wind alpha.
+       The disc.nu (viscosity) is assumed to be the turbulent viscosity only.
+       The wind contribution is added via psi: alpha_tot = alpha_turb * (1 + psi).
+       psi_DW can be a scalar or a spatially-varying array matching the grid.
     """
     def __init__(self, psi_DW, lambda_DW=3, tol=0.5, boundary='power_law', in_bound='Mdot'):
         self._tol = tol
@@ -370,15 +371,27 @@ class HybridWindModel(object):
         self._lambda = lambda_DW
         self._psi = psi_DW
 
+    @property
+    def psi(self):
+        return self._psi
+
+    @psi.setter
+    def psi(self, value):
+        self._psi = value
+
     def ASCII_header(self):
         """header"""
+        psi_str = 'array({:.2e}..{:.2e})'.format(
+            np.min(self._psi), np.max(self._psi)) if np.ndim(self._psi) > 0 else str(self._psi)
         return '# {} tol: {}, psi_DW: {}, lambda_DW: {}'.format(self.__class__.__name__, 
-            self._tol, self._psi, self._lambda)
+            self._tol, psi_str, self._lambda)
 
     def HDF5_attributes(self):
         """Class information for HDF5 headers"""
+        psi_str = 'array({:.2e}..{:.2e})'.format(
+            np.min(self._psi), np.max(self._psi)) if np.ndim(self._psi) > 0 else str(self._psi)
         return self.__class__.__name__, { "tol" : str(self._tol),
-                                          "psi_DW" : str(self._psi),
+                                          "psi_DW" : psi_str,
                                           "lambda_DW" : str(self._lambda) }
     def _setup_grid(self, grid):
         """Compute the grid factors"""
