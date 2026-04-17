@@ -311,9 +311,14 @@ class IrradiatedEOS(EOS_Table):
         If the user wishes to be self-consistent, one must choose a magnetic lever 
         arm parameter (lambda) such that lambda = 1 + psi/(2(1 - e_rad)(3 + psi)). 
     """
-    def __init__(self, star, alpha_t, Tc=10, Tmax=1500., mu=2.4, gamma=1.4,
+    def __init__(self, star, alpha_t, alpha_tot=None, 
+                 Tc=10, Tmax=1500., mu=2.4, gamma=1.4,
                  kappa=None,
-                 accrete=True, tol=None, psi=0, e_rad=1): # tol is no longer used
+                 accrete=True,
+                 tol=None, 
+                 psi=0, 
+                 e_rad=1):
+        
         super(IrradiatedEOS, self).__init__()
 
         self._star = star
@@ -336,7 +341,13 @@ class IrradiatedEOS(EOS_Table):
         
         self._T = None
 
-        self._psi = psi
+        self._alpha_tot = alpha_tot
+        
+        #creates the psi array from alpha_tot (effective) and the given value of alpha_t
+        if self._alpha_tot is not None:
+            self._psi = self._alpha_tot / self._alpha_t - 1
+        else:
+            self._psi = psi
 
         self._e_rad = e_rad
 
@@ -492,6 +503,38 @@ class IrradiatedEOS(EOS_Table):
     @property
     def star(self):
         return self._star
+
+    @property
+    def alpha_t(self):
+        """Turbulent alpha parameter (scalar or array)."""
+        return self._alpha_t
+
+    @alpha_t.setter
+    def alpha_t(self, value):
+        self._alpha_t = value
+        if self._alpha_tot is not None:
+            self._psi = self._alpha_tot / self._alpha_t - 1
+
+    @property
+    def alpha_tot(self):
+        """Total alpha (turbulent + wind). None if psi is set directly."""
+        return self._alpha_tot
+
+    @alpha_tot.setter
+    def alpha_tot(self, value):
+        self._alpha_tot = value
+        if value is not None:
+            self._psi = value / self._alpha_t - 1
+
+    @property
+    def psi(self):
+        """Wind-to-turbulent alpha ratio (scalar or array)."""
+        return self._psi
+
+    @psi.setter
+    def psi(self, value):
+        self._psi = value
+        self._alpha_tot = None
 
     def ASCII_header(self):
         """IrradiatedEOS header"""
