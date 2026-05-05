@@ -959,12 +959,14 @@ class TypeIMigration(object):
 
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
-        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi)) #alpha_tot
+        #nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi)) #alpha_tot
+        nu = disc.interp(Rp, disc.nu) #kinematic visc , everywhere with nu will only be the kinematic viscosity
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
         
-        Xi = nu/Pr
+        #Xi = nu/Pr
+        Xi = nu/Pr * (1 + (disc._gas.psi/3.0)) #nu_eff, not just kin here since multiplying by 1 + psi/3
         Q = 2*Xi/(3*h*h*h*Rp*Rp*Om_k)
         g_eff = self.gamma_eff_tab(Q)
         
