@@ -147,20 +147,29 @@ class SimpleDiscEOS(EOS_Table):
     (2019).
 
     args:
-        alpha_t : turbulent alpha parameter
-        star    : stellar properties
-        mu      : mean molecular weight, default=2.33
-        K0      : Opacity constant (K = K0 T), default = 0.01
+        alpha_t   : turbulent alpha parameter
+        star      : stellar properties
+        alpha_tot : total alpha (turbulent + wind). If given, psi is derived.
+        mu        : mean molecular weight, default=2.33
+        K0        : Opacity constant (K = K0 T), default = 0.01
+        psi       : wind-to-turbulent alpha ratio, default=0
+        e_rad     : fraction of accretion energy radiated locally, default=1
     """
-    def __init__(self, star, alpha_t, mu=2.33, K0=0.01):
+    def __init__(self, star, alpha_t, alpha_tot=None, mu=2.33, K0=0.01,
+                 psi=0, e_rad=1):
         super(SimpleDiscEOS, self).__init__()
         
         self._alpha_t = alpha_t
         self._mu = mu
         self._K0 = K0
         self._star = star
-        
-        self._Tnu = np.sqrt(27/64*alpha_t*Omega0*GasConst*K0/(mu*sig_SB))
+        self._e_rad = e_rad
+
+        self._alpha_tot = alpha_tot
+        if self._alpha_tot is not None:
+            self._psi = self._alpha_tot / self._alpha_t - 1
+        else:
+            self._psi = psi
 
         self._set_constants()
 
@@ -169,6 +178,8 @@ class SimpleDiscEOS(EOS_Table):
 
         Ls = star.Rs**2 * (star.T_eff / 5770)**4
         self._Tirr0 = 150 * Ls**(2/7.) * star.M**(-4/7)
+
+        self._Tnu = np.sqrt(27/64 * self._alpha_t * Omega0 * GasConst * self._K0 / (self._mu * sig_SB))
         self._Tnu0 = self._Tnu * star.M**0.25
 
         self._cs0 = (Omega0**-1/AU) * (GasConst / self._mu)**0.5
@@ -182,7 +193,7 @@ class SimpleDiscEOS(EOS_Table):
         self._set_constants()
 
         Tirr = self._Tirr0 * self._R**(-3/7.)
-        Tvis = self._Tnu * Sigma * self._R**-0.75
+        Tvis = (self._Tnu * np.sqrt((1 + self._psi/3) * self._e_rad) * Sigma * self._R**-0.75)
 
         self._T = (Tirr**4 + Tvis**4)**0.25
         self._Sigma = Sigma
@@ -234,11 +245,43 @@ class SimpleDiscEOS(EOS_Table):
     def nu0(self):
         return self._nu0
 
+    @property
+    def alpha_t(self):
+        """Turbulent alpha parameter (scalar or array)."""
+        return self._alpha_t
+
+    @alpha_t.setter
+    def alpha_t(self, value):
+        self._alpha_t = value
+        if self._alpha_tot is not None:
+            self._psi = self._alpha_tot / self._alpha_t - 1
+
+    @property
+    def alpha_tot(self):
+        """Total alpha (turbulent + wind). None if psi is set directly."""
+        return self._alpha_tot
+
+    @alpha_tot.setter
+    def alpha_tot(self, value):
+        self._alpha_tot = value
+        if value is not None:
+            self._psi = value / self._alpha_t - 1
+
+    @property
+    def psi(self):
+        """Wind-to-turbulent alpha ratio (scalar or array)."""
+        return self._psi
+
+    @psi.setter
+    def psi(self, value):
+        self._psi = value
+        self._alpha_tot = None
+
     def ASCII_header(self):
-        """LocallyIsothermalEOS header string"""
+        """SimpleDiscEOS header string"""
         head = super(SimpleDiscEOS, self).ASCII_header()
-        head += ', alpha: {}, mu: {}, K0= {}'
-        return head.format(self._alpha_t, self._mu, self._K0)
+        head += ', alpha: {}, mu: {}, K0= {}, e_rad: {}'
+        return head.format(self._alpha_t, self._mu, self._K0, self._e_rad)
 
     def HDF5_attributes(self):
         """Class information for HDF5 headers"""
@@ -246,6 +289,7 @@ class SimpleDiscEOS(EOS_Table):
         head["alpha"] = "{}".format(self._alpha_t)
         head['mu'] = "{}".format(self._mu)
         head['K0'] = "{}".format(self._K0)
+        head['e_rad'] = "{}".format(self._e_rad)
         return name, head
 
     @staticmethod
@@ -489,7 +533,7 @@ class IrradiatedEOS(EOS_Table):
         kappa = self._kappa_arr
         tau = 0.5 * self._Sigma * kappa
         f_esc = 1 + 2/(3*tau*tau)
-        Pr_1 =  2.25 * self._gamma * (self._gamma - 1) * f_esc
+        Pr_1 =  4 * 2.25 * self._gamma * (self._gamma - 1) * f_esc
         return 1. / Pr_1
 
     @property

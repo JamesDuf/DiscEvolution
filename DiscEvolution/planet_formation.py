@@ -959,7 +959,7 @@ class TypeIMigration(object):
 
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
-        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi))
+        nu    = disc.interp(Rp, disc.nu * (1 + disc._gas.psi)) #alpha_tot
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
