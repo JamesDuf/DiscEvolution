@@ -193,7 +193,9 @@ class SimpleDiscEOS(EOS_Table):
         self._set_constants()
 
         Tirr = self._Tirr0 * self._R**(-3/7.)
-        Tvis = (self._Tnu * np.sqrt((1 + self._psi/3) * self._e_rad) * Sigma * self._R**-0.75)
+        #Tvis = (self._Tnu * np.sqrt((1 + self._psi/3) * self._e_rad) * Sigma * self._R**-0.75)
+        Tvis = (self._Tnu * Sigma * self._R**-0.75)
+
 
         self._T = (Tirr**4 + Tvis**4)**0.25
         self._Sigma = Sigma
