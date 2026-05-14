@@ -822,6 +822,7 @@ def run_model(config):
     fig.colorbar(sm, cax=cax)
 
     fig.savefig('test.png', bbox_inches='tight')
+    plt.show()
 
 if __name__ == "__main__":
     config = {
