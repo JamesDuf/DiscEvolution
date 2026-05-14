@@ -60,3 +60,7 @@ scripts/plot_planet_R-t.py
 scripts/plot_planet_evo.py
 scripts/plot_planets.py
 scripts/snap_reader.py
+tests/test_atomic_data.py
+tests/test_io.py
+tests/test_simple_chem.py
+tests/test_viscous_evo.py
