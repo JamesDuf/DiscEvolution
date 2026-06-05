@@ -962,7 +962,11 @@ class TypeIMigration(object):
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
         nu_SS = disc.interp(Rp, disc.nu)
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+
+        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
+        nu  = disc.interp(Rp, disc.nu) * (1 + psi)
+
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
@@ -1013,7 +1017,11 @@ class TypeIMigration(object):
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
         nu_SS = disc.interp(Rp, disc.nu)
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+
+        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
+        nu  = disc.interp(Rp, disc.nu) * (1 + psi)
+
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
@@ -1064,7 +1072,11 @@ class TypeIMigration(object):
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
         nu_SS = disc.interp(Rp, disc.nu)
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+
+        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
+        nu  = disc.interp(Rp, disc.nu) * (1 + psi)
+        
         Pr    = disc.interp(Rp, disc.Pr)
 
         Om_k = star.Omega_k(Rp)
@@ -1139,7 +1151,9 @@ class TypeIIMigration(object):
         disc = self._disc
         
         Sigma = disc.interp(Rp, disc.Sigma)
-        nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
+        nu  = disc.interp(Rp, disc.nu) * (1 + psi)
 
         Sigma *= AU**2/Mearth
 
@@ -1214,8 +1228,12 @@ class PlanetMigration(object):
         Me = Mp*Mearth/Msun
         q = Me / star.M
         rH = star.r_Hill(Rp, Mp)
-        nu = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
-    # For testing
+        
+        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
+        psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
+        nu  = disc.interp(Rp, disc.nu) * (1 + psi)
+
+        # For testing
         #nu = disc.interp(Rp, disc.nu)
 
         H  = disc.interp(Rp, disc.H)
