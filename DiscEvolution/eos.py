@@ -531,11 +531,545 @@ class IrradiatedEOS(EOS_Table):
 
         return IrradiatedEOS(star, alpha, **kwargs)
 
+class DeadZoneEOS(IrradiatedEOS):
+    """Irradiated EOS with a dead-zone transition"""
+    
+    def __init__(
+        # general parameters
+        self, 
+        star, 
+
+        # alpha solver
+        psi,
+        Mdot,
+        alpha_guess = 1e-3,
+
+        # Deadzone radius evolution
+        evolution_model = 'linear',
+        r0=None,      # Dead zone radius at t0 (AU)
+        r1=None,      # Dead zone radius at t1 (AU)
+        r_floor=None,  # Minimum dead zone radius (AU)
+        t0=None,       # Reference time 0 (yr)
+        t1=None,       # Reference time 1 (yr)
+        t_initial_yr=0.0, # Simulation start time in yr
+
+        # Standard IrradiatedEOS parameters
+        Tc=10.0,
+        Tmax=1500.0,
+        mu=2.4,
+        gamma=1.4,
+        kappa=None,
+        accrete=True,
+        e_rad=1.0,
+
+        # Thermal solver behaviour
+        warm_start=True,  # If False, clear self._T each step for a full-bracket solve
+    ):
+        # Parent Initializer
+        super(DeadZoneEOS, self).__init__(
+            star,
+            alpha_t=alpha_guess,
+            Tc=Tc,
+            Tmax=Tmax,
+            mu=mu,
+            gamma=gamma,
+            kappa=kappa,
+            accrete=accrete,
+            psi=psi,
+            e_rad=e_rad,
+        )
+
+        # Store DeadZone-specific parameters
+        self._Mdot = Mdot
+        self._alpha_guess = alpha_guess
+        
+        # Evolution model choice
+        if evolution_model not in ('linear', 'exponential', 'static'):
+            raise ValueError(f"Unknown evolution_model: {evolution_model}")
+        self._evolution_model = evolution_model
+        
+        # Evolution parameters
+        self._r0 = r0
+        self._r1 = r1
+        self._r_floor = r_floor
+        self._t0 = t0
+        self._t1 = t1
+        
+        # Will be computed correctly each time update() is called
+        self._R_dz = None
+        
+        # Track absolute time in years
+        self._t_current_yr = t_initial_yr
+        self._t_initial_yr = t_initial_yr
+        
+        # Stored scalar profile values defining the tanh alpha/psi transition.
+        # Populated by build_alpha_psi_arrays(); once set, update() rebuilds the
+        # spatial arrays each step as the dead zone moves.
+        self._profile_set = False
+        self._alpha_dead = None
+        self._alpha_active = None
+        self._psi_dead = None
+        self._psi_active = None
+        self._w = None
+        
+        # Whether to warm-start the thermal solver from the previous temperature.
+        # If False, self._T is cleared each step so brentq solves from the full
+        # [Tc, Tmax] bracket (guaranteed valid, avoids bracket-inversion failures).
+        self._warm_start = warm_start
+
+    def update(self, dt, Sigma, amax=1e-5, star=None):
+        """
+        Update the EOS with dead zone radius evolution.
+        
+        Parameters
+        ----------
+        dt : float
+            Time step in code units
+        Sigma : array
+            Surface density (g/cm^2)
+        amax : float, optional
+            Maximum grain size (cm). Default: 1e-5
+        star : Star object, optional
+            Updated stellar properties
+            
+        Returns
+        -------
+        None
+            Updates internal state: temperature, alpha arrays, dead zone radius
+        """
+        
+        # Increment absolute time 
+        self._t_current_yr += dt / yr
+        
+        # Update dead zone radius at current time
+        self._R_dz = self._compute_R_dz(self._t_current_yr)
+        
+        # Rebuild the spatial alpha/psi arrays so the viscosity structure
+        # follows the moving dead zone (only once a profile has been set)
+        if self._profile_set:
+            self._rebuild_alpha_psi()
+        
+        # If warm-start is disabled, clear the cached temperature so the parent
+        # solves from the full [Tc, Tmax] bracket (still guaranteed to bracket a root)
+        if self._warm_start == False:
+            self._T = None
+        
+        # Call parent's thermal balance update
+        super(DeadZoneEOS, self).update(dt, Sigma, amax=amax, star=star)
+
+    def alpha_from_Mdot_psi(self, disc, wind_model, Mdot_target, max_iterations=20, tol=1e-3):
+        """
+        Solve for alpha at the star surface given Mdot_target and fixed psi using iterative refinement.
+        
+        The iteration scheme is: alpha_new = alpha_old * (Mdot_target / Mdot_actual)
+        
+        Parameters
+        ----------
+        disc : Disc object
+            The disc on which to compute Mdot
+        wind_model : wind model object
+            The wind/viscous model (must have viscous_velocity method)
+        Mdot_target : float
+            Target accretion rate (Msun/yr)
+        max_iterations : int
+            Maximum number of iterations
+        tol : float
+            tolerance for convergence, stops when iteration Mdot is within tol of target Mdot
+            
+        Returns
+        -------
+        alpha_converged : float
+            The converged value of alpha
+        """
+        
+        alpha = self._alpha_t # alpha_guess from initializer
+        
+        for iteration in range(max_iterations):
+            # Update self with current alpha
+            self._alpha_t = alpha
+            self.update(0, disc.Sigma)  # Re-solves thermal balance equation, updates psi and other values automatically
+            
+            # Compute current Mdot
+            vr = wind_model.viscous_velocity(disc)
+            Mdot_actual = disc.Mdot(vr[0])
+            
+            # Check if within tolerance
+            rel_error = np.abs(Mdot_actual - Mdot_target) / Mdot_target
+            if rel_error < tol:
+                print(f"Alpha solver converged to within {tol:%} of target accretion rate after iteration {iteration}: alpha={alpha:.6e}, Mdot={Mdot_actual:.6e}")
+                return alpha
+            
+            # Update alpha
+            alpha_new = alpha * (Mdot_target / Mdot_actual)
+            alpha = alpha_new
+
+        # update alpha_t with most recent alpha value even if it didn't converge
+        self._alpha_t = alpha
+
+        print(f"Warning: Alpha solver did not converge to within {tol:%} of target accretion rate after {max_iterations} iterations")
+        print(f"  Final alpha: {alpha:.6e}")
+        print(f"  Final Mdot: {disc.Mdot(wind_model.viscous_velocity(disc)[0]):.6e}")
+        print(f"  Target Mdot: {Mdot_target:.6e}")
+        
+        return alpha
+
+    def _compute_R_dz_linear(self, t):
+        """
+        Linearly move dead zone radius inward from r0 to r_floor.
+        
+        Computes velocity from two calibration points (r0, t0) and (r1, t1),
+        then linearly extrapolates, flooring at r_floor.
+
+        Treats (r0, t0) as the intial point and (r1, t1) as the final point.  
+        
+        Parameters
+        ----------
+        t : float
+            Time in yr
+            
+        Returns
+        -------
+        R_dz : float
+            Dead zone radius in AU
+        """
+        
+        # Compute velocity from calibration points
+        if self._t1 <= self._t0:
+            raise ValueError("Need t1 > t0")
+        
+        velocity = (self._r0 - self._r1) / (self._t1 - self._t0)  # AU/yr
+        
+        # Linear extrapolation from r0 at t0
+        t_rel = max(0.0, t - self._t0)
+        R_dz = self._r0 - velocity * t_rel
+        
+        # Floor at r_floor
+        return max(R_dz, self._r_floor)
+
+    def _compute_R_dz_exponential(self, t):
+        """
+        Exponentially move dead zone radius inward from r0 to r_floor.
+        
+        Uses two calibration points (r0, t0) and (r1, t1) to compute the
+        decay time constant tau, then evolves exponentially.
+
+        Treats (r0, t0) as the intial point and (r1, t1) as the final point.
+        
+        Parameters
+        ----------
+        t : float
+            Time in yr
+            
+        Returns
+        -------
+        R_dz : float
+            Dead zone radius in AU
+        """
+        
+        # Validate parameters
+        if not (self._r_floor < self._r1 < self._r0):
+            raise ValueError("Need r_floor < r1 < r0 for inward exponential decay")
+        
+        if self._t1 <= self._t0:
+            raise ValueError("Need t1 > t0")
+        
+        # Compute decay timescale from calibration points
+        tau = -(self._t1 - self._t0) / np.log((self._r1 - self._r_floor) / (self._r0 - self._r_floor))
+        
+        # Prevent R_dz from exceeding r0 before t0
+        if t <= self._t0:
+            return self._r0
+        
+        # Exponential decay
+        R_dz = self._r_floor + (self._r0 - self._r_floor) * np.exp(-(t - self._t0) / tau)
+        
+        # Floor at r_floor (for numerical safety)
+        return max(R_dz, self._r_floor)
+
+    def _compute_R_dz_static(self, t):
+        """
+        Return a static (constant) dead zone radius.
+        
+        Useful for testing or non-evolving dead zone scenarios.
+        
+        Parameters
+        ----------
+        t : float
+            Time in yr (ignored)
+            
+        Returns
+        -------
+        R_dz : float
+            Dead zone radius in AU (constant = self._r0)
+        """
+        return self._r0
+
+    def _compute_R_dz(self, t):
+        """
+        Compute dead zone radius at time t using the selected evolution model.
+        
+        Parameters
+        ----------
+        t : float
+            Time in yr
+            
+        Returns
+        -------
+        R_dz : float
+            Dead zone radius in AU
+        """
+        if self._evolution_model == 'linear':
+            return self._compute_R_dz_linear(t)
+        elif self._evolution_model == 'exponential':
+            return self._compute_R_dz_exponential(t)
+        elif self._evolution_model == 'static':
+            return self._compute_R_dz_static(t)
+        else:
+            raise ValueError(f"Unknown evolution_model: {self._evolution_model}")
+
+    def build_alpha_psi_arrays(self, alpha_active, alpha_dead=None, psi_dead=None, psi_active=0.01, w=1.0):
+        """
+        Define the tanh alpha/psi profile and build the initial spatial arrays.
+        
+        Stores the scalar dead-zone and active-zone values that define the
+        transition. After this is called once, update() automatically rebuilds
+        the spatial arrays each step as the dead zone radius moves (so the dead
+        zone values should be captured here while self._alpha_t / self._psi are
+        still scalars, e.g. straight after alpha_from_Mdot_psi).
+        
+        The dead zone (r < R_dz) has alpha_dead and psi_dead.
+        The active region (r > R_dz) has alpha_active and psi_active.
+        
+        Parameters
+        ----------
+        alpha_active : float
+            Turbulent alpha in the active region (r > R_dz)
+        alpha_dead : float, optional
+            Alpha in dead zone. If None, captured from the current scalar
+            self._alpha_t (from the solver), or the previously stored value.
+        psi_dead : float, optional
+            Wind parameter in dead zone. If None, captured from the current
+            scalar self._psi, or the previously stored value.
+        psi_active : float, optional
+            Wind parameter in active region. Default: 0.01
+        w : float, optional
+            Transition width in # of scale heights. Default: 1.0
+            
+        Returns
+        -------
+        None
+            Stores scalar profile values and assigns the spatial arrays to
+            self._alpha_t and self._psi.
+        """
+        
+        # Resolve the dead-zone scalars. Prefer an explicit argument; otherwise
+        # use the stored scalar (if a profile was already set) or capture from
+        # the current scalar attribute. Never re-read once these are arrays.
+        if alpha_dead is None:
+            alpha_dead = self._alpha_dead if self._profile_set else self._alpha_t
+        if psi_dead is None:
+            psi_dead = self._psi_dead if self._profile_set else self._psi
+        
+        # Validate scalar inputs before storing
+        for name, val in (('alpha_dead', alpha_dead), ('alpha_active', alpha_active),
+                          ('psi_dead', psi_dead), ('psi_active', psi_active)):
+            if not np.isscalar(val) or not np.isfinite(val):
+                raise ValueError(f"build_alpha_psi_arrays: {name} must be a finite scalar (got {val!r})")
+        if alpha_dead <= 0 or alpha_active <= 0:
+            raise ValueError("build_alpha_psi_arrays: alpha values must be positive")
+        if psi_dead < 0 or psi_active < 0:
+            raise ValueError("build_alpha_psi_arrays: psi values must be non-negative")
+        if w <= 0:
+            raise ValueError(f"build_alpha_psi_arrays: transition width w must be > 0 (got {w})")
+        
+        # Store the scalar profile (used by update() to rebuild every step)
+        self._alpha_dead = float(alpha_dead)
+        self._alpha_active = float(alpha_active)
+        self._psi_dead = float(psi_dead)
+        self._psi_active = float(psi_active)
+        self._w = float(w)
+        self._profile_set = True
+        
+        # Build the spatial arrays at the current dead zone radius
+        self._rebuild_alpha_psi()
+        
+        print(f"Built alpha/psi arrays with tanh transition:")
+        print(f"  alpha_dead={self._alpha_dead:.6e}, alpha_active={self._alpha_active:.6e}")
+        print(f"  psi_dead={self._psi_dead:.6e}, psi_active={self._psi_active:.6e}")
+        print(f"  R_dz={self._R_dz:.4f} AU, transition width w={self._w:.4f} scale heights")
+
+    def _rebuild_alpha_psi(self):
+        """
+        Rebuild the spatial alpha and psi arrays from the stored scalar profile.
+        
+        Uses the stored dead/active scalars and the current self._R_dz to build
+        a tanh transition, then assigns the arrays to self._alpha_t and self._psi
+        (the attributes the parent's thermal balance reads). Called every step by
+        update() so the structure follows the moving dead zone.
+        """
+        if not self._profile_set:
+            raise RuntimeError("_rebuild_alpha_psi: profile not set; call build_alpha_psi_arrays first")
+        if self._R_dz is None:
+            raise RuntimeError("_rebuild_alpha_psi: R_dz is None; call update() first")
+        
+        alpha_dead = self._alpha_dead
+        alpha_active = self._alpha_active
+        psi_dead = self._psi_dead
+        psi_active = self._psi_active
+        w = self._w
+        
+        # One scale height at dead zone radius
+        H = np.interp(self._R_dz, self._R, self._H)
+        if not np.isfinite(H) or H <= 0:
+            raise ValueError(f"_rebuild_alpha_psi: invalid scale height at R_dz={self._R_dz} (H={H})")
+        
+        # Build tanh transition: 0 inside dead zone, 1 in active region
+        transition = 0.5 * ( 1 + np.tanh((self._R - self._R_dz) / (w * H)) )
+        
+        # Build spatially-varying arrays
+        alpha_arr = alpha_dead + (alpha_active - alpha_dead) * transition
+        psi_arr = psi_dead + (psi_active - psi_dead) * transition
+        
+        # Clamp to the physical range spanned by the endpoints (guards against
+        # floating-point overshoot) and enforce positivity / non-negativity
+        alpha_lo, alpha_hi = min(alpha_dead, alpha_active), max(alpha_dead, alpha_active)
+        psi_lo, psi_hi = min(psi_dead, psi_active), max(psi_dead, psi_active)
+        alpha_arr = np.clip(alpha_arr, alpha_lo, alpha_hi)
+        psi_arr = np.clip(psi_arr, psi_lo, psi_hi)
+        
+        # Final safety check: no NaN/inf leaked through
+        if not np.all(np.isfinite(alpha_arr)):
+            raise ValueError("_rebuild_alpha_psi: non-finite values in alpha array")
+        if not np.all(np.isfinite(psi_arr)):
+            raise ValueError("_rebuild_alpha_psi: non-finite values in psi array")
+        
+        # Assign validated arrays to the attributes the parent's thermal
+        # balance reads (self._alpha_t and self._psi)
+        self._alpha_t = alpha_arr
+        self._psi = psi_arr
+
+    def ASCII_header(self):
+        """DeadZoneEOS header.
+
+        Built from the base table header plus IrradiatedEOS-style fields, but
+        using the SCALAR dead-zone alpha (self._alpha_t may be an array once a
+        profile has been built, which must not be written into the header).
+        """
+        head = EOS_Table.ASCII_header(self)
+        head += ', opacity: {}, T_extern: {}K, accrete: {}, Tmax: {}K'.format(
+            self._kappa.__class__.__name__, self._Tc, self._accrete, self._Tmax)
+        head += ', Mdot: {}'.format(self._Mdot)
+        head += ', evolution_model: {}, r0: {}, r1: {}, r_floor: {}'.format(
+            self._evolution_model, self._r0, self._r1, self._r_floor)
+        head += ', t0: {}, t1: {}, t_initial_yr: {}, warm_start: {}'.format(
+            self._t0, self._t1, self._t_initial_yr, self._warm_start)
+        head += ', alpha_dead: {}, alpha_active: {}, psi_dead: {}, psi_active: {}, w: {}'.format(
+            self._alpha_dead, self._alpha_active, self._psi_dead, self._psi_active, self._w)
+        return head
+
+    def HDF5_attributes(self):
+        """Class information for HDF5 headers."""
+        name, head = EOS_Table.HDF5_attributes(self)
+
+        head["opacity"]         = self._kappa.__class__.__name__
+        head["T_extern"]        = "{} K".format(self._Tc)
+        head["accrete"]         = "{}".format(bool(self._accrete))
+        head["Tmax"]            = "{} K".format(self._Tmax)
+        head["Mdot"]            = "{}".format(self._Mdot)
+        head["evolution_model"] = "{}".format(self._evolution_model)
+        head["r0"]              = "{}".format(self._r0)
+        head["r1"]              = "{}".format(self._r1)
+        head["r_floor"]         = "{}".format(self._r_floor)
+        head["t0"]              = "{}".format(self._t0)
+        head["t1"]              = "{}".format(self._t1)
+        head["t_initial_yr"]    = "{}".format(self._t_initial_yr)
+        head["warm_start"]      = "{}".format(bool(self._warm_start))
+        head["alpha_dead"]      = "{}".format(self._alpha_dead)
+        head["alpha_active"]    = "{}".format(self._alpha_active)
+        head["psi_dead"]        = "{}".format(self._psi_dead)
+        head["psi_active"]      = "{}".format(self._psi_active)
+        head["w"]               = "{}".format(self._w)
+
+        return name, head
+
+    @staticmethod
+    def from_file(filename):
+        import star
+
+        star = star.from_file(filename)
+
+        # Locate the DeadZoneEOS header line
+        string = None
+        with open(filename) as f:
+            for line in f:
+                if not line.startswith('#'):
+                    raise AttributeError("Error: EOS type not found in header")
+                elif "DeadZoneEOS" in line:
+                    string = line
+                    break
+        if string is None:
+            raise AttributeError("Error: DeadZoneEOS header not found")
+
+        # Parse 'key: value' pairs. Keys may carry the class-name prefix on the
+        # first field (e.g. 'DeadZoneEOS gamma'); normalise to the last token.
+        raw = {}
+        for item in string.lstrip('#').split(','):
+            if ':' not in item:
+                continue
+            key, val = item.split(':', 1)
+            raw[key.strip().split()[-1]] = val.strip()
+
+        def num(key, default=None):
+            """Parse a numeric field, tolerating a 'K' suffix and 'None'."""
+            if key not in raw or raw[key] == 'None':
+                return default
+            return float(raw[key].replace('K', '').strip())
+
+        kwargs = dict(
+            evolution_model = raw.get('evolution_model', 'linear'),
+            r0           = num('r0'),
+            r1           = num('r1'),
+            r_floor      = num('r_floor'),
+            t0           = num('t0'),
+            t1           = num('t1'),
+            t_initial_yr = num('t_initial_yr', 0.0),
+            Tc           = num('T_extern', 10.0),
+            Tmax         = num('Tmax', 1500.0),
+            mu           = num('mu', 2.4),
+            gamma        = num('gamma', 1.4),
+            accrete      = (raw.get('accrete', 'True') == 'True'),
+            warm_start   = (raw.get('warm_start', 'True') == 'True'),
+        )
+
+        psi         = num('psi_dead', 0.0)
+        Mdot        = num('Mdot')
+        alpha_guess = num('alpha_dead', 1e-3)
+
+        eos = DeadZoneEOS(star, psi, Mdot, alpha_guess=alpha_guess, **kwargs)
+
+        # Restore the stored tanh profile so the spatial arrays can be rebuilt
+        alpha_active = num('alpha_active')
+        psi_active   = num('psi_active')
+        w            = num('w', 1.0)
+        if alpha_active is not None and psi_active is not None:
+            eos._alpha_dead   = alpha_guess
+            eos._alpha_active = alpha_active
+            eos._psi_dead     = psi
+            eos._psi_active   = psi_active
+            eos._w            = w
+            eos._profile_set  = True
+
+        return eos
+
+    
+
 def from_file(filename):
     with open(filename) as f:
         for line in f:
             if not line.startswith('#'):
                 raise AttributeError("Error: EOS type not found in header")
+            elif "DeadZoneEOS" in line:
+                return DeadZoneEOS.from_file(filename)
             elif "IrradiatedEOS" in line:
                 return IrradiatedEOS.from_file(filename)      
             elif "SimpleDiscEOS" in line:
