@@ -715,7 +715,7 @@ class DeadZoneEOS(IrradiatedEOS):
 
     def _compute_R_dz_linear(self, t):
         """
-        Linearly move dead zone radius inward from r0 to r_floor.
+        Linearly move dead zone radius inward from r0 to r1.
         
         Computes velocity from two calibration points (r0, t0) and (r1, t1),
         then linearly extrapolates, flooring at r_floor.
@@ -767,7 +767,7 @@ class DeadZoneEOS(IrradiatedEOS):
         """
         
         # Validate parameters
-        if not (self._r_floor < self._r1 < self._r0):
+        if not (self._r_floor <= self._r1 < self._r0):
             raise ValueError("Need r_floor < r1 < r0 for inward exponential decay")
         
         if self._t1 <= self._t0:
