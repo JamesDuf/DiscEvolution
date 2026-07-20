@@ -819,6 +819,9 @@ def run_model(config, cli_output_dir=None):
                 h5f.create_dataset("disk_planetesimal_mol_abund", shape=(0, Nmol, nR), maxshape=(None, Nmol, nR), dtype="f8")
             h5f.create_dataset("T", shape=(0, nR), maxshape=(None, nR), dtype="f8")
             h5f.create_dataset("xe", shape=(0, nR), maxshape=(None, nR), dtype="f8")
+            h5f.create_dataset("B_xe", shape=(0, nR), maxshape=(None, nR), dtype="f8")
+            h5f.create_dataset("C_xe", shape=(0, nR), maxshape=(None, nR), dtype="f8")
+            h5f.create_dataset("D_xe", shape=(0, nR), maxshape=(None, nR), dtype="f8")
 
             # Dead-zone / disc-structure diagnostics
             h5f.create_dataset("alpha_R", shape=(0, nR), maxshape=(None, nR), dtype="f8")
@@ -943,6 +946,15 @@ def run_model(config, cli_output_dir=None):
                 xe0 = np.asarray(getattr(disc._eos, "_xe_prev", np.full(nR, np.nan)), dtype="f8")
                 h5f["xe"].resize(1, axis=0)
                 h5f["xe"][0, :] = xe0
+                B_xe0 = np.asarray(getattr(disc._eos, "_B_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                C_xe0 = np.asarray(getattr(disc._eos, "_C_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                D_xe0 = np.asarray(getattr(disc._eos, "_D_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                h5f["B_xe"].resize(1, axis=0)
+                h5f["B_xe"][0, :] = B_xe0
+                h5f["C_xe"].resize(1, axis=0)
+                h5f["C_xe"][0, :] = C_xe0
+                h5f["D_xe"].resize(1, axis=0)
+                h5f["D_xe"][0, :] = D_xe0
 
                 h5f.flush()
 
@@ -1204,6 +1216,9 @@ def run_model(config, cli_output_dir=None):
                         for name in ["t", "disk_Mdot_star", "disk_Mass", "Tc", "Sigc", "R_dz_t"]:
                             h5f[name].resize(k + 1, axis=0)
                         h5f["xe"].resize(k + 1, axis=0)
+                        h5f["B_xe"].resize(k + 1, axis=0)
+                        h5f["C_xe"].resize(k + 1, axis=0)
+                        h5f["D_xe"].resize(k + 1, axis=0)
 
                         h5f["t"][k] = t / (2*np.pi)   # years
                         disk_v = disc._gas.viscous_velocity(disc, disc.Sigma)
@@ -1216,6 +1231,12 @@ def run_model(config, cli_output_dir=None):
                         h5f["R_dz_t"][k] = float(_R_dz_val) if _R_dz_val is not None else np.nan
                         xe_profile = np.asarray(getattr(disc._eos, "_xe_prev", np.full(nR, np.nan)), dtype="f8")
                         h5f["xe"][k, :] = xe_profile
+                        B_xe = np.asarray(getattr(disc._eos, "_B_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                        C_xe = np.asarray(getattr(disc._eos, "_C_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                        D_xe = np.asarray(getattr(disc._eos, "_D_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                        h5f["B_xe"][k, :] = B_xe
+                        h5f["C_xe"][k, :] = C_xe
+                        h5f["D_xe"][k, :] = D_xe
 
                         for ip, planet in enumerate(planets):
                             for name, val, grp in [

@@ -617,7 +617,12 @@ class DeadZoneEOS(IrradiatedEOS):
         # If False, self._T is cleared each step so brentq solves from the full
         # [Tc, Tmax] bracket (guaranteed valid, avoids bracket-inversion failures).
         self._warm_start = warm_start
+
+        # xe solver diagnostics 
         self._xe_prev = None                # will be used to pass previous xe to next iteration (warm_start-like but doesn't have a toggle)
+        self._B_xe_prev = None
+        self._C_xe_prev = None
+        self._D_xe_prev = None
 
         # Timing steps to find bottleneck
         # profiling switches/counters
@@ -664,6 +669,9 @@ class DeadZoneEOS(IrradiatedEOS):
         B = (beta_t / beta_d) * xm
         C = (-zeta) / (beta_d * n)
         D = (-zeta * beta_t * xm) / (beta_d * beta_r * n)
+        self._B_xe_prev = B
+        self._C_xe_prev = C
+        self._D_xe_prev = D
 
         active = zeta > 0.0                 # zeta = 0 gives xe = 0
         if not np.any(active):              
