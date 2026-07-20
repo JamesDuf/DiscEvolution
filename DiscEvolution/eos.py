@@ -3,6 +3,7 @@ import numpy as np
 from DiscEvolution.brent import brentq
 from DiscEvolution import opacity
 from DiscEvolution.constants import *
+import time 
 
 ################################################################################
 # Thermodynamics classes
@@ -584,7 +585,7 @@ class DeadZoneEOS(IrradiatedEOS):
         self._alpha_guess = alpha_guess
         
         # Evolution model choice
-        if evolution_model not in ('linear', 'exponential', 'static'):
+        if evolution_model not in ('linear', 'exponential', 'static', 'ionization'):
             raise ValueError(f"Unknown evolution_model: {evolution_model}")
         self._evolution_model = evolution_model
         
@@ -616,6 +617,283 @@ class DeadZoneEOS(IrradiatedEOS):
         # If False, self._T is cleared each step so brentq solves from the full
         # [Tc, Tmax] bracket (guaranteed valid, avoids bracket-inversion failures).
         self._warm_start = warm_start
+        self._xe_prev = None                # will be used to pass previous xe to next iteration (warm_start-like but doesn't have a toggle)
+
+        # Timing steps to find bottleneck
+        # profiling switches/counters
+        self._timer = False                  # set to False to remove timing
+        self._calls = 0
+        self._t_total = 0.0
+        self._t_xe = 0.0
+        self._t_rest = 0.0
+
+    # Cosmic Ray Ionization Rate (Alessi & Pudritz, 2017)
+    def _zeta_CR(self, Sigma):
+        zeta_0 = 1e-17        # cosmic-ray ionization rate [1/s] (Spitzer & Tomasko, 1968)
+        Sigma_0 = 96.0        # CR attenuation length [g/cm^2] (Spitzer & Tomasko, 1968)
+
+        zeta = (zeta_0/2.0) * np.exp(-(Sigma)/(Sigma_0)) # Sigma passed is already in cgs so ok
+        
+        return zeta #cgs
+
+    def _rho_mid(self, Sigma):
+        rho_mid = Sigma / (np.sqrt(2*np.pi) * self._H * AU)   # g/cm^3
+        return rho_mid
+    
+    def _n_density(self, Sigma):
+        rho_mid = self._rho_mid(Sigma)
+        n = rho_mid / (self._mu * m_H) 
+        return n   
+
+    # xe polynomial stuff (Alessi & Pudritz, 2017)
+    def _xe(self,n, zeta, xe_previous=None):
+        """ 
+        Compute the ionization fraction at a each radius. Return xe array. 
+         """
+
+        T = self._T 
+        xe = np.zeros_like(T, dtype=float)
+
+        beta_d = 2.0 * 1e-6 * (T**-0.5)      # cm^3/s
+        beta_r = 3.0 * 1e-11 * (T**-0.5)     # cm^3/s
+        beta_t = 3.0 * 1e-9                 # cm^3/s
+        xm = 0.0011                         # Metal fraction 
+
+        # --------- Newton in log-space --------
+        # Coefficients + constant  ->  A(xe**3) + B(xe**2) + C(xe) + D = 0
+        B = (beta_t / beta_d) * xm
+        C = (-zeta) / (beta_d * n)
+        D = (-zeta * beta_t * xm) / (beta_d * beta_r * n)
+
+        active = zeta > 0.0                 # zeta = 0 gives xe = 0
+        if not np.any(active):              
+            return xe                       # Fast solution if not ionized anywhere
+
+        Ba = B[active]
+        Ca = C[active]
+        Da = D[active]
+
+        # Bracket the positive solution in log10(xe)
+        y_lower = np.full_like(Ba, -40.0)
+        y_upper = np.zeros_like(Ba)
+
+        # Initial guess
+        if xe_previous is not None:
+            previous = np.asarray(xe_previous)[active]
+            y = np.log10(np.clip(previous, 1.0e-40, 1.0))
+        else:
+            # Use the two limiting ionization estimates
+            xe_molecular = np.sqrt(
+                zeta[active] / (beta_d[active] * n[active])
+            )
+
+            xe_metal = np.sqrt(
+                zeta[active] / (beta_r[active] * n[active])
+            )
+
+            # Geometric mean of the limiting estimates
+            y = 0.5 * (
+                np.log10(xe_molecular)
+                + np.log10(xe_metal)
+            )
+
+            y = np.clip(y, y_lower, y_upper)
+
+        ln10 = np.log(10.0)
+
+        for _ in range(20):
+            x = 10.0**y
+
+            f = x**3 + Ba*x**2 + Ca*x + Da
+            fp = 3.0*x**2 + 2.0*Ba*x + Ca
+
+            # Update the bracket using the current point
+            y_upper = np.where(f > 0.0, y, y_upper)
+            y_lower = np.where(f <= 0.0, y, y_lower)
+
+            derivative_log = ln10 * x * fp
+
+            with np.errstate(divide="ignore", invalid="ignore"):
+                y_newton = y - f / derivative_log
+
+            # Reject unsafe Newton steps
+            unsafe = (
+                ~np.isfinite(y_newton)
+                | (np.abs(derivative_log) < 1.0e-300)
+                | (y_newton <= y_lower)
+                | (y_newton >= y_upper)
+            )
+
+            y_bisection = 0.5 * (y_lower + y_upper)
+
+            y_new = np.where(
+                unsafe,
+                y_bisection,
+                y_newton
+            )
+
+            if np.max(np.abs(y_new - y)) < 1.0e-12:
+                y = y_new
+                break
+
+            y = y_new
+
+        xe_active = 10.0**y
+
+        # Verify the solutions
+        residual = np.abs(
+            xe_active**3
+            + Ba*xe_active**2
+            + Ca*xe_active
+            + Da
+        )
+
+        scale = (
+            np.abs(xe_active**3)
+            + np.abs(Ba*xe_active**2)
+            + np.abs(Ca*xe_active)
+            + np.abs(Da)
+        )
+
+        valid = (
+            np.isfinite(xe_active)
+            & (xe_active > 0.0)
+            & (
+                residual
+                <= 1.0e-8 * np.maximum(scale, 1.0e-300)
+            )
+        )
+
+        xe[active] = xe_active
+
+        return xe
+
+
+
+        # # -------- Faster solver with Vectorized Cardano Formula -------- -> gave negative roots 
+        # # Coefficients + constant  ->  A(xe**3) + B(xe**2) + C(xe) + D = 0
+        # # A = 1.0                           # unused with Cardano
+        # B = (beta_t / beta_d) * xm
+        # C = (-zeta) / (beta_d * n)
+        # D = (-zeta * beta_t * xm) / (beta_d * beta_r * n)
+
+        # active = zeta > 0.0                 # zeta = 0 gives xe = 0
+        # if not np.any(active):              
+        #     return xe                       # Fast solution if not ionized anywhere
+
+        # Bb = B[active]
+        # Cc = C[active]
+        # Dd = D[active]
+
+        # # Convert to depressed cubic
+        # # y^3 + p*y + q = 0  with  xe = y - B/3
+        # p = Cc - (Bb**2 / 3.0)
+        # q = 2.0 * (Bb**3 / 27.0) - (Bb * Cc / 3.0) + Dd
+
+        # discriminant = (q / 2.0)**2 + (p / 3.0)**3
+        # roots_positive = np.empty_like(Bb)
+
+        # # Account for small round-off errors near discriminant = 0
+        # scale = np.maximum(
+        #     (q / 2.0)**2 + np.abs((p / 3.0)**3),
+        #     np.finfo(float).tiny
+        # )
+
+        # one_real = discriminant >= (
+        #     -100.0 * np.finfo(float).eps * scale
+        # )
+
+        # # One real root
+        # sqrt_disc = np.sqrt(np.maximum(discriminant[one_real], 0.0))
+
+        # y = (
+        #     np.cbrt(-q[one_real] / 2.0 + sqrt_disc)
+        #     + np.cbrt(-q[one_real] / 2.0 - sqrt_disc)
+        # )
+
+        # roots_positive[one_real] = y - Bb[one_real] / 3.0
+
+        # # Three real roots: calculate all three and select the positive one
+        # three_real = ~one_real
+
+        # if np.any(three_real):
+        #     p3 = p[three_real]
+        #     q3 = q[three_real]
+        #     B3 = Bb[three_real]
+
+        #     amplitude = 2.0 * np.sqrt(-p3 / 3.0)
+
+        #     argument = -q3 / (
+        #         2.0 * np.sqrt(-(p3 / 3.0)**3)
+        #     )
+        #     argument = np.clip(argument, -1.0, 1.0)
+
+        #     theta = np.arccos(argument)
+
+        # candidate_roots = np.stack([
+        #     amplitude * np.cos(theta / 3.0) - B3 / 3.0,
+        #     amplitude * np.cos((theta + 2.0*np.pi) / 3.0)
+        #     - B3 / 3.0,
+        #     amplitude * np.cos((theta + 4.0*np.pi) / 3.0)
+        #     - B3 / 3.0
+        # ])
+
+        # positive_candidates = np.where(
+        #     candidate_roots > 0.0,
+        #     candidate_roots,
+        #     np.nan
+        # )
+
+        # selected = np.nanmax(positive_candidates, axis=0)
+
+        # if np.any(~np.isfinite(selected)):
+        #     raise ValueError("Failed to find a positive electron-fraction root using Vectorized Cardano Solver.")
+
+        # roots_positive[three_real] = selected
+
+        # if np.any(roots_positive <= 0.0):
+        #     raise ValueError("Vectorized Cardano Solver returned a non-positive electron fraction.")
+
+        # xe[active] = roots_positive
+
+        # return xe
+
+
+
+
+        # --------- Slower original roots solver --------
+        #TODO:used as backup option
+        # for i in range(len(T)):
+        #     # Coefficients + constant  ->  A(xe**3) + B(xe**2) + C(xe) + D = 0
+        #     A = 1.0
+        #     B = (beta_t / beta_d[i]) * xm
+        #     C = (-zeta[i]) / (beta_d[i] * n[i])
+        #     D = (-zeta[i] * beta_t * xm) / (beta_d[i] * beta_r[i] * n[i])
+
+        #     # solve
+        #     roots = np.roots([A,B,C,D])
+
+        #     # Keep roots whose imaginary part is essentially zero
+        #     real_roots = roots.real[np.isclose(roots.imag, 0.0, atol=1e-12)]
+
+        #     # Keep only positive roots (cannot have ion fraction < 0)
+        #     positive_roots = real_roots[real_roots > 0.0]
+
+        #     if len(positive_roots) != 1: 
+        #         raise ValueError(f'xe solver error at radius {self._R[i]} AU: Exected to find only one positive root but found {roots}')
+
+        #     xe[i] = positive_roots[0]
+
+        # return xe
+
+    # Magnetic Diffusivity 
+    def _eta(self, T, xe): 
+        eta = (234.0 * (T**0.5))/(xe)
+        return eta  #cm^2/s
+    
+    def _Elsasser(self, eta, Omega, cs): 
+        Lambda = (self._alpha_t * (cs**2))/(eta * Omega)
+        return Lambda 
 
     def update(self, dt, Sigma, amax=1e-5, star=None):
         """
@@ -637,18 +915,27 @@ class DeadZoneEOS(IrradiatedEOS):
         None
             Updates internal state: temperature, alpha arrays, dead zone radius
         """
-        
+        # In ionization mode, first iteration doesn't have a Temperature Profile,
+        # so call super with dt = 0.0 (instead of t0 + dt like in next step) to get a Temperature profile
+        # TODO: check this makes sense? 
+        if self._evolution_model == "ionization" and self._T is None:
+            super(DeadZoneEOS, self).update(0.0, Sigma, amax=amax, star=star)
+
         # Increment absolute time 
         self._t_current_yr += dt / yr
         
         # Update dead zone radius at current time
-        self._R_dz = self._compute_R_dz(self._t_current_yr)
+        self._R_dz = self._compute_R_dz(self._t_current_yr, Sigma)
         
         # Rebuild the spatial alpha/psi arrays so the viscosity structure
         # follows the moving dead zone (only once a profile has been set)
         if self._profile_set:
             self._rebuild_alpha_psi()
-        
+
+        #TODO: In ionization mode, if disable warm start it won't have a Temperature profile and I'm not sure how to handle that case. Prevent it for now 
+        if self._warm_start == False and self._evolution_model == "ionization":
+            raise ValueError('Cannot disable warm_start while using ionization deadzone model.')
+
         # If warm-start is disabled, clear the cached temperature so the parent
         # solves from the full [Tc, Tmax] bracket (still guaranteed to bracket a root)
         if self._warm_start == False:
@@ -804,7 +1091,55 @@ class DeadZoneEOS(IrradiatedEOS):
         """
         return self._r0
 
-    def _compute_R_dz(self, t):
+    def _compute_R_dz_ionization(self, Sigma):
+        """
+        Return the dead zone radius computed from ionization fraction.
+        """
+        if self._timer:
+            t0 = time.perf_counter()                          # toggle event timer
+
+        R     = self._R                                   # AU
+        T     = self._T                                   # K 
+        Omega = Omega0 * self._star.Omega_k(R)            # 1/s
+        cs    = np.sqrt(GasConst * T / self._mu)          # cm/s
+
+        n = self._n_density(Sigma)                  
+        zeta = self._zeta_CR(Sigma)
+
+        if self._timer:
+            tx0 = time.perf_counter()                         # timer toggle start of roots solver
+
+        xe  = self._xe(n, zeta, xe_previous=self._xe_prev)    # solves polynomial
+        self._xe_prev = xe                                    # save xe to pass to next iteration
+
+        if self._timer:
+            tx1 = time.perf_counter()                         # timer toggle end of roots solver
+
+        eta  = self._eta(T, xe)                          
+        
+        Lambda = self._Elsasser(eta, Omega, cs)           # Lambda(R) -> find where it crosses unity
+        # Deadzone mask
+        deadzone = Lambda <= 1.0
+
+        if deadzone.any() == False:
+            return R[0]                                    # no dead zone at so return Rdz = R_in
+        Rdz = R[deadzone].max()                            # outer edge of dead zone marks Rdz
+
+        # Timer diagnostics
+        if self._timer:
+            t1 = time.perf_counter()
+            self._calls += 1
+            self._t_total += (t1 - t0)
+            self._t_xe += (tx1 - tx0)
+            self._t_rest += (t1 - t0) - (tx1 - tx0)
+            if self._calls % 200 == 0:
+                avg_ms = 1e3 * self._t_total / self._calls
+                xe_pct = 100.0 * self._t_xe / self._t_total
+                print(f"[ionization step timer] calls={self._calls} avg={avg_ms:.3f} ms  xe={xe_pct:.1f}%")
+
+        return Rdz
+
+    def _compute_R_dz(self, t, Sigma=None):
         """
         Compute dead zone radius at time t using the selected evolution model.
         
@@ -824,6 +1159,8 @@ class DeadZoneEOS(IrradiatedEOS):
             return self._compute_R_dz_exponential(t)
         elif self._evolution_model == 'static':
             return self._compute_R_dz_static(t)
+        elif self._evolution_model == 'ionization':
+            return self._compute_R_dz_ionization(Sigma) # Sigma available in update() so ok
         else:
             raise ValueError(f"Unknown evolution_model: {self._evolution_model}")
 

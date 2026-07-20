@@ -764,6 +764,7 @@ def run_model(config, cli_output_dir=None):
             h5f.create_dataset("disk_Mass", shape=(0,), maxshape=(None,), dtype="f8")
             h5f.create_dataset("Tc", shape=(0,), maxshape=(None,), dtype="f8")
             h5f.create_dataset("Sigc", shape=(0,), maxshape=(None,), dtype="f8")
+            h5f.create_dataset("R_dz_t", shape=(0,), maxshape=(None,), dtype="f8")
             h5f.attrs["alpha_SS"] = float(alpha_SS)
 
             # Per-planet extendable datasets
@@ -817,6 +818,7 @@ def run_model(config, cli_output_dir=None):
                 h5f.create_dataset("disk_planetesimal_atom_abund", shape=(0, Natom, nR), maxshape=(None, Natom, nR), dtype="f8")
                 h5f.create_dataset("disk_planetesimal_mol_abund", shape=(0, Nmol, nR), maxshape=(None, Nmol, nR), dtype="f8")
             h5f.create_dataset("T", shape=(0, nR), maxshape=(None, nR), dtype="f8")
+            h5f.create_dataset("xe", shape=(0, nR), maxshape=(None, nR), dtype="f8")
 
             # Dead-zone / disc-structure diagnostics
             h5f.create_dataset("alpha_R", shape=(0, nR), maxshape=(None, nR), dtype="f8")
@@ -837,13 +839,15 @@ def run_model(config, cli_output_dir=None):
             disk_Mdot = -2*np.pi * disc._grid.Rc[0:-1] * disc.Sigma[0:-1] * disk_v * (AU*AU)*(yr/Msun)
             if 0.0 not in sim_params['t_interval']:
                 # Scalars
-                for name in ["t", "disk_Mdot_star", "disk_Mass", "Tc", "Sigc"]:
+                for name in ["t", "disk_Mdot_star", "disk_Mass", "Tc", "Sigc", "R_dz_t"]:
                     h5f[name].resize(1, axis=0)
                 h5f["t"][0]              = 0.0
                 h5f["disk_Mdot_star"][0] = disk_Mdot[0]
                 h5f["disk_Mass"][0]      = disc.Mtot()
                 h5f["Tc"][0]             = disc.T[0]
                 h5f["Sigc"][0]           = disc.Sigma[0]
+                _R_dz_val = getattr(disc._eos, "_R_dz", np.nan)
+                h5f["R_dz_t"][0]         = float(_R_dz_val) if _R_dz_val is not None else np.nan
 
                 # Per-planet
 
@@ -934,6 +938,11 @@ def run_model(config, cli_output_dir=None):
                 _R_dz_val = getattr(disc._eos, "_R_dz", np.nan)
                 h5f["R_dz"].resize(1, axis=0)
                 h5f["R_dz"][0] = float(_R_dz_val) if _R_dz_val is not None else np.nan
+
+                # Ionization fraction at every cell, aligned with t
+                xe0 = np.asarray(getattr(disc._eos, "_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                h5f["xe"].resize(1, axis=0)
+                h5f["xe"][0, :] = xe0
 
                 h5f.flush()
 
@@ -1185,13 +1194,16 @@ def run_model(config, cli_output_dir=None):
                         print(f"\rNstep: {n}", flush=True)
                         print(f"\rTime: {t/(1.e6*2*np.pi)} Myr", flush=True)
                         print(f"\rdt: {dt/(2*np.pi)} yr", flush=True)
+                        if hasattr(eos, "_R_dz") and (eos._R_dz is not None):
+                            print(f"\rRdz: {eos._R_dz:.6g} AU", flush=True)                     # Prints out Rdz diagnostic in console during runtime
                         print(f"\rETA: {eta_hours:02d}::{eta_minutes:02d} (h::m)", flush=True)
 
                     # --- every 5 steps: stream per-planet series ---
                     if planet_params['include_planets'] and (n % 5 == 0):
                         k = h5f["t"].shape[0]
-                        for name in ["t", "disk_Mdot_star", "disk_Mass", "Tc", "Sigc"]:
+                        for name in ["t", "disk_Mdot_star", "disk_Mass", "Tc", "Sigc", "R_dz_t"]:
                             h5f[name].resize(k + 1, axis=0)
+                        h5f["xe"].resize(k + 1, axis=0)
 
                         h5f["t"][k] = t / (2*np.pi)   # years
                         disk_v = disc._gas.viscous_velocity(disc, disc.Sigma)
@@ -1200,6 +1212,10 @@ def run_model(config, cli_output_dir=None):
                         h5f["disk_Mass"][k] = disc.Mtot()
                         h5f["Tc"][k] = disc.T[0]
                         h5f["Sigc"][k] = disc.Sigma[0]
+                        _R_dz_val = getattr(disc._eos, "_R_dz", np.nan)
+                        h5f["R_dz_t"][k] = float(_R_dz_val) if _R_dz_val is not None else np.nan
+                        xe_profile = np.asarray(getattr(disc._eos, "_xe_prev", np.full(nR, np.nan)), dtype="f8")
+                        h5f["xe"][k, :] = xe_profile
 
                         for ip, planet in enumerate(planets):
                             for name, val, grp in [
