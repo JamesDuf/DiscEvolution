@@ -673,15 +673,18 @@ class DeadZoneEOS(IrradiatedEOS):
         self._C_xe_prev = C
         self._D_xe_prev = D
 
-        active = zeta > 0.0                 # zeta = 0 gives xe = 0
+        # Fast solution if not ionized anywhere, zeta = 0 -> zero ionization rate -> zero ionization fraction 
+        # We do this since the polynomial would still return a non-zero value despite zeta == 0
+        # This removes unnecessary computations 
+        # TODO: check if this is correct approach 
+        active = zeta > 0.0                  
         if not np.any(active):              
-            return xe                       # Fast solution if not ionized anywhere
-
+            return xe                       
         Ba = B[active]
         Ca = C[active]
         Da = D[active]
 
-        # Bracket the positive solution in log10(xe)
+        # Only allow values 10^-40 < xe < 1.0
         y_lower = np.full_like(Ba, -40.0)
         y_upper = np.zeros_like(Ba)
 
@@ -691,64 +694,61 @@ class DeadZoneEOS(IrradiatedEOS):
             y = np.log10(np.clip(previous, 1.0e-40, 1.0))
         else:
             # Use the two limiting ionization estimates
-            xe_molecular = np.sqrt(
-                zeta[active] / (beta_d[active] * n[active])
-            )
-
-            xe_metal = np.sqrt(
-                zeta[active] / (beta_r[active] * n[active])
-            )
+            xe_molecular = np.sqrt(zeta[active] / (beta_d[active] * n[active]))
+            xe_metal = np.sqrt(zeta[active] / (beta_r[active] * n[active]))
 
             # Geometric mean of the limiting estimates
-            y = 0.5 * (
-                np.log10(xe_molecular)
-                + np.log10(xe_metal)
-            )
-
+            y = 0.5 * (np.log10(xe_molecular)+ np.log10(xe_metal))
             y = np.clip(y, y_lower, y_upper)
 
         ln10 = np.log(10.0)
 
         for _ in range(20):
             x = 10.0**y
-
-            f = x**3 + Ba*x**2 + Ca*x + Da
-            fp = 3.0*x**2 + 2.0*Ba*x + Ca
+            f = x**3 + Ba*x**2 + Ca*x + Da      
+            fp = 3.0*x**2 + 2.0*Ba*x + Ca  
 
             # Update the bracket using the current point
-            y_upper = np.where(f > 0.0, y, y_upper)
-            y_lower = np.where(f <= 0.0, y, y_lower)
+            y_upper = np.where(f > 0.0, y, y_upper)         # f > 0: current pt is above the root, so use it as upper bound
+            y_lower = np.where(f <= 0.0, y, y_lower)        # f <= 0: current pt is below the root, so use it as lower bound
 
-            derivative_log = ln10 * x * fp
+            # Derivative after change of variable
+            derivative_log = ln10 * x * fp 
 
+            # Newton Step
             with np.errstate(divide="ignore", invalid="ignore"):
                 y_newton = y - f / derivative_log
 
-            # Reject unsafe Newton steps
+            # Reject unsafe Newton steps, replace those points with bisection
             unsafe = (
-                ~np.isfinite(y_newton)
-                | (np.abs(derivative_log) < 1.0e-300)
-                | (y_newton <= y_lower)
-                | (y_newton >= y_upper)
+                ~np.isfinite(y_newton)                      # reject NaNs 
+                | (np.abs(derivative_log) < 1.0e-300)       # reject derivative too close to zero
+                | (y_newton <= y_lower)                     # reject below lower bound 
+                | (y_newton >= y_upper)                     # reject above upper bound
             )
 
             y_bisection = 0.5 * (y_lower + y_upper)
 
+            # Safeguard 
             y_new = np.where(
                 unsafe,
                 y_bisection,
                 y_newton
             )
 
+            # Check if EVERY cell has converged: diff between previous step and this one is smaller than 1e-12
             if np.max(np.abs(y_new - y)) < 1.0e-12:
                 y = y_new
                 break
 
+            # If not all converged yet, repeat 
             y = y_new
 
+        # Convert back from log space (revert change of variable)
         xe_active = 10.0**y
 
         # Verify the solutions
+        # Residuals 
         residual = np.abs(
             xe_active**3
             + Ba*xe_active**2
@@ -756,6 +756,7 @@ class DeadZoneEOS(IrradiatedEOS):
             + Da
         )
 
+        # Scale
         scale = (
             np.abs(xe_active**3)
             + np.abs(Ba*xe_active**2)
@@ -763,6 +764,7 @@ class DeadZoneEOS(IrradiatedEOS):
             + np.abs(Da)
         )
 
+        # Check that all solutions is posdef, and close enough to true solution
         valid = (
             np.isfinite(xe_active)
             & (xe_active > 0.0)
@@ -771,7 +773,8 @@ class DeadZoneEOS(IrradiatedEOS):
                 <= 1.0e-8 * np.maximum(scale, 1.0e-300)
             )
         )
-
+        
+        # Place our solutions in the radial array, but leave the spots where zeta <= 0 zero 
         xe[active] = xe_active
 
         return xe
