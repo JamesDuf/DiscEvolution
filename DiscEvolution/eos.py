@@ -1134,7 +1134,15 @@ class DeadZoneEOS(IrradiatedEOS):
 
         if deadzone.any() == False:
             return R[0]                                    # no dead zone at so return Rdz = R_in
-        Rdz = R[deadzone].max()                            # outer edge of dead zone marks Rdz
+
+        if deadzone.all() == True:
+            Rdz = R[-1]                                     # entire disc is dead so return Rdz = R_out
+
+        # Rdz = R[deadzone].max()                            # outer edge of dead zone marks Rdz -> this used to cause issues because no interpolation
+        
+        # As long as Lambda increases monotonically, interpolate directly for Lambda = 1
+        # TODO: add monoticity check perhaps
+        Rdz = np.interp(1.0, Lambda, R)
 
         # Timer diagnostics
         if self._timer:
