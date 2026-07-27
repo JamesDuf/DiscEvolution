@@ -928,7 +928,7 @@ class DeadZoneEOS(IrradiatedEOS):
         """
         # In ionization mode, first iteration doesn't have a Temperature Profile,
         # so call super with dt = 0.0 (instead of t0 + dt like in next step) to get a Temperature profile
-        # TODO: check this makes sense? 
+        # TODO: check this makes sense?  -> it doesnt evolve the disk, only solves the thermal balance with brent and update thermodynamics values like H, nu, cs, kappa, Pr 
         if self._evolution_model == "ionization" and self._T is None:
             super(DeadZoneEOS, self).update(0.0, Sigma, amax=amax, star=star)
 

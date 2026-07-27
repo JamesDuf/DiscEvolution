@@ -405,7 +405,7 @@ def run_model(config, cli_output_dir=None):
             vr = gas_temp.viscous_velocity(disc,Sigma)
             Mdot_actual = disc.Mdot(vr)[0] # solar masses per year
 
-            # Scale alpha by Mdot
+            # Scale alpha by Mdo/t
             alpha_new = alpha*Mdot/Mdot_actual
             alpha = 0.5 * (alpha + alpha_new) # average done to damp oscillations in numerical solution
 
@@ -445,7 +445,7 @@ def run_model(config, cli_output_dir=None):
             disc = AccretionDisc(grid, star, eos, Sigma)
 
             # solve the dead-zone (interior) accretion alpha for the target Mdot
-            eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)
+            eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)    #TODO: this function returns an alpha value, doesnt set anything, so does this do nothing? 
 
             # lay down the spatial dead/active alpha & psi profile
             eos.build_alpha_psi_arrays(
