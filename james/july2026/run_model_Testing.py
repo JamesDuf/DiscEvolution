@@ -24,6 +24,7 @@ from DiscEvolution.planet_formation import *
 from DiscEvolution.diffusion import TracerDiffusion
 from DiscEvolution.opacity import Tazzari2016, Zhu2012
 from DiscEvolution.chemistry import *
+from DiscEvolution.solvers import *
 from copy import deepcopy
 
 import time
@@ -352,7 +353,7 @@ def run_model(config, cli_output_dir=None):
 
     elif grid_params['type'] == 'winds-alpha':
         # For fixed Rd, Mdot and Mdisk, solve for alpha with disk winds
-        # assumes gamma = 1 #TODO: Check if outdated comment
+        # assumes gamma = 1
 
         # extract params
         Mdot=disc_params['Mdot'] # solar masses per year
@@ -445,7 +446,8 @@ def run_model(config, cli_output_dir=None):
             disc = AccretionDisc(grid, star, eos, Sigma)
 
             # solve the dead-zone (interior) accretion alpha for the target Mdot
-            eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)    #TODO: this function returns an alpha value, doesnt set anything, so does this do nothing? 
+            #eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)    #TODO: this function returns an alpha value, doesnt set anything, so does this do nothing? 
+            solvers.psi_from_alphaSS_Mdot(eos, disc, gas_temp)
 
             # lay down the spatial dead/active alpha & psi profile
             eos.build_alpha_psi_arrays(
