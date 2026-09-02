@@ -24,6 +24,14 @@ from DiscEvolution.chemistry import *
 from copy import deepcopy
 
 
+# ---------------- James, September 2, 2026 -----------------------
+# The intent is to move over all the individual solvers from the run model script branches 
+# i.e. 'Booth-alpha' 'Booth-Rd' "LBP" 'Booth-Mdot' 'winds-alpha'
+# I moved the two solvers I made for DeadZoneEOS (used in winds-alpha) but left the rest for later
+# For now, simply collapsing the unused if-else branches in the run_model file is good enough but 
+# for clarity and ease of use, moving them here and importing them in the run_model script will be better. 
+
+
 def alphaSS_from_Mdot_psi(eos, disc, wind_model, Mdot_target, guess = None, max_iterations=20, tol=1e-5):
     """
     Solve for alpha at the star surface given Mdot_target and fixed psi using iterative refinement.
