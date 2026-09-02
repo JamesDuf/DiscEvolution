@@ -15,9 +15,9 @@
     "simulation": {
         "t_initial": 0,
         "t_final": 100000.0,
-        "t_interval": [0, 0.001, 0.005, 0.01, 0.05, 0.075, 0.1],
+        "t_interval": [0, 0.001, 0.005, 0.01],
         "eta_abort_hours": 24,
-        "output_dir": "/Users/james/Documents/GitHub/DiscEvolution/james/august2026/output/CR_0.1Myr/"
+        "output_dir": "/Users/james/Documents/GitHub/DiscEvolution/james/august2026/output/CR_0.01Myr/trig/"
     },
     "disc": {
         "alpha": 0.00322259263116507,

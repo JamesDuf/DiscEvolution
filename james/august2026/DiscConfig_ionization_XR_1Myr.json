@@ -14,10 +14,10 @@
     },
     "simulation": {
         "t_initial": 0,
-        "t_final": 100000.0,
-        "t_interval": [0, 0.001, 0.005, 0.01, 0.05, 0.075, 0.1],
+        "t_final": 1000000.0,
+        "t_interval": [0, 0.001, 0.005, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
         "eta_abort_hours": 24,
-        "output_dir": "/Users/james/Documents/GitHub/DiscEvolution/james/august2026/output/CR_0.1Myr/"
+        "output_dir": "/Users/james/Documents/GitHub/DiscEvolution/james/august2026/output/XR_1Myr/"
     },
     "disc": {
         "alpha": 0.00322259263116507,
@@ -35,7 +35,7 @@
         "q": -0.2,
         "Tmax": 1500.0,
         "evolution_model": "ionization",
-        "ionization_model": "CR",
+        "ionization_model": "XR",
         "r0": null,
         "r1": null,
         "r_floor": null,
