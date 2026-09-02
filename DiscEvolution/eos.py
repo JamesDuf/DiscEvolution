@@ -547,6 +547,7 @@ class DeadZoneEOS(IrradiatedEOS):
 
         # Deadzone radius evolution
         evolution_model = 'linear',
+        ionization_model = 'CR+XR',
         r0=None,      # Dead zone radius at t0 (AU)
         r1=None,      # Dead zone radius at t1 (AU)
         r_floor=None,  # Minimum dead zone radius (AU)
@@ -588,6 +589,10 @@ class DeadZoneEOS(IrradiatedEOS):
         if evolution_model not in ('linear', 'exponential', 'static', 'ionization'):
             raise ValueError(f"Unknown evolution_model: {evolution_model}")
         self._evolution_model = evolution_model
+
+        if ionization_model not in ('CR', 'XR', 'CR+XR'):
+            raise ValueError(f"Unknown ionization_model: {ionization_model}")
+        self._ionization_model = ionization_model
         
         # Evolution parameters
         self._r0 = r0
@@ -623,6 +628,16 @@ class DeadZoneEOS(IrradiatedEOS):
         self._B_xe_prev = None
         self._C_xe_prev = None
         self._D_xe_prev = None
+        self._zeta_prev = None               # total ionization rate [1/s], stored for output
+        self._zeta_CR_prev = None            # cosmic-ray ionization rate [1/s]
+        self._zeta_XR_prev = None            # X-ray ionization rate [1/s]
+        self._eta_prev = None                # magnetic diffusivity [cm^2/s]
+        self._Lambda_prev = None             # Elsasser number
+        self._n_prev = None                  # midplane number density [1/cm^3]
+        self._NH_prev = None                 # X-ray column density [1/cm^2]
+        self._tau_prev = None                # X-ray optical depth
+        self._JXR_prev = None                # X-ray attenuation factor
+        self._sigmaXR_prev = None            # X-ray absorption cross-section [cm^2]
 
         # Timing steps to find bottleneck
         # profiling switches/counters
@@ -640,6 +655,152 @@ class DeadZoneEOS(IrradiatedEOS):
         zeta = (zeta_0/2.0) * np.exp(-(Sigma)/(Sigma_0)) # Sigma passed is already in cgs so ok
         
         return zeta #cgs
+
+    # X Ray Ionization Rate (Alessi & Pudritz, 2017)
+    def _zeta_XR(self, Sigma, source_R_Rsun = 12.0 , source_z_Rsun = 12.0, L_x_erg_s = 1e30, kTx_keV=4, E_keV=4, deltaE_eV=13.6): 
+        # Lx = X ray luminostity of the star
+        # kTx =  average xray energy taken to be 12 Rsol above midplane and at r = 12 Rsol to represent magnetospheric accretion onto the star 
+        # E = primary electron energy
+        # delta E = energy to make an ion pair
+        # d = some point on the disc surface (compute from dr = |R_Source - R| and dz = |Zsource - Zsurface|) where Zsurface is taken to be 4 times the scale height (A & M, 2003)
+        
+        keV_to_erg = 1.602176634e-9
+
+        source_R = source_R_Rsun * Rsun     # cm
+        source_z = source_z_Rsun * Rsun     # cm
+        R_cm = self._R * AU                 # cm
+        
+        # Approximate Chiang-style disk surface height
+        z_surface = 4.0 * self._H * AU      # cm 
+
+        # Vector from X-ray source to disk surface
+        dr = R_cm - source_R                # cm    
+        dz = z_surface - source_z           # cm
+
+        # Straight-line distance from source to disk surface
+        d = np.sqrt(dr**2 + dz**2)          # cm
+
+        sigma_XR_val = self._sigma_XR(E_keV)                                                                                # cm^2
+
+        primary_ionizations_term = ( L_x_erg_s / (kTx_keV * keV_to_erg * 4 * np.pi * d**2) ) * sigma_XR_val                 # s^-1
+
+        secondary_electrons_production_term = kTx_keV * 1000 / deltaE_eV                                                  # unitless
+
+        NH  = self._NH_XR(Sigma, source_R_Rsun=source_R_Rsun, source_z_Rsun=source_z_Rsun)                                 # cm^-2
+        tau = NH * sigma_XR_val                                                                                             # unitless
+        JXR = self._J_XR(tau)                                                                                               # unitless
+        attenuation_term = JXR
+
+        # Store intermediates so they don't need to be recomputed for output
+        self._sigmaXR_prev = sigma_XR_val
+        self._NH_prev = NH
+        self._tau_prev = tau
+        self._JXR_prev = JXR
+
+        zeta =  primary_ionizations_term * secondary_electrons_production_term * attenuation_term                         # s^-1
+        return zeta 
+
+    def _J_XR(self, tau, npts=300, x0 = 1, x1 = 100):      
+        # x = E / E_keV                                                 # dimensionless energy parameter, E is primary electron energy 
+        
+        n = 2.81                                                        # Glassgold et al. 1997
+        x = np.logspace(np.log10(x0), np.log10(x1), num=npts)           # Integral bounds from x0 = 1 to x1 = +inf -> use 100   from Matsumura & Pudritz 2003
+        
+        tau = np.atleast_1d(tau)                                        # Convert tau to an array  
+        J = np.empty_like(tau, dtype=float)
+
+        for i, tau_i in enumerate(tau):
+            # clip to prevent overflow errors, force always negative to combat sign errors (which shouldn't happen anyways)
+            exponent = np.clip(-x - tau_i * x**(-n), -700, 0)
+
+            # integrand 
+            integrand = x**(-n) * np.exp(exponent)
+
+            #integrate 
+            J[i] = np.trapezoid(integrand, x=x)
+
+        return J                                                        # unitless
+
+    def _sigma_XR(self, E_keV=4):
+        sigma0 = 8.5E-23                        # cm^2
+        n = 2.81                                # Glassgold et al. 1997
+
+        sigma = sigma0 * (E_keV)**(-n)          # cm^2
+        return sigma                            
+
+    def _tau_XR(self, Sigma, source_R_Rsun, source_z_Rsun, E_keV=4):
+
+        tau = self._NH_XR(Sigma, source_R_Rsun, source_z_Rsun) * self._sigma_XR(E_keV)                # unitless
+        return tau                             
+
+    def _NH_XR(self, Sigma, source_R_Rsun, source_z_Rsun, grazing_angle='trig'):
+
+        Nperp = Sigma / (2.0 * self._mu * m_H)    # Integral reduces to this when using the midplane as lower bound (z = 0)
+
+        if grazing_angle == '2003':
+            alpha_prime = self._alpha_prime_XR_2003(source_R_Rsun, source_z_Rsun)
+
+        if grazing_angle == 'trig':
+            alpha_prime = self._alpha_prime_XR_trig(source_R_Rsun, source_z_Rsun)
+
+        if grazing_angle not in ('trig', '2003'):
+            raise ValueError("Invalid grazing-angle model choice")
+
+        sin_alpha_prime = np.sin(alpha_prime)
+        
+        return Nperp / sin_alpha_prime
+
+
+    def _alpha_prime_XR_2003(self, source_R_Rsun, source_z_Rsun):
+
+        source_R = source_R_Rsun * Rsun                    # cm
+        source_z = source_z_Rsun * Rsun                    # cm
+        Rstar = self._star.Rs * Rsun                       # cm
+
+        # disk surface def as 4 times P scale height
+        H = 4.0 * self._H * AU                             # cm
+
+        # disk radius
+        a = self._R * AU                                   # cm
+
+        dlnH_dlna = np.gradient(np.log(H), np.log(a))      # unitless
+
+        # Chiang 2001
+        alpha = np.arctan( dlnH_dlna * (H / a) ) - np.arctan( H / a ) + np.arcsin( (4 * Rstar)/( 3*np.pi*a) ) 
+
+        # Matsumura & Pudritz 2003
+        beta = np.arctan( dlnH_dlna * (H / a) )
+
+        # Matsumura & Pudritz 2003
+        gamma = np.arctan( (H - 0.5*Rstar)/(a - 0.5*np.sqrt(3)*Rstar) ) - np.arctan( (H - source_z)/(a - source_R) )
+
+        alpha_prime = alpha - beta + gamma
+        return alpha_prime
+
+    def _alpha_prime_XR_trig(self, source_R_Rsun, source_z_Rsun):
+
+        source_R = source_R_Rsun * Rsun     # cm
+        source_z = source_z_Rsun * Rsun     # cm
+        R_cm = self._R * AU                 # cm
+
+        # Approximate Chiang-style disk surface height
+        # z_surface = 4.0 * self._H * AU      # cm 
+
+        # Vector from X-ray source to disk surface
+        dr = R_cm - source_R                # cm    
+        # dz = z_surface - source_z           # cm
+        dz = source_z                       # cm
+
+        # Straight-line distance from source to disk surface
+        # d = np.sqrt(dr**2 + dz**2)          # cm
+
+        # alpha_prime is the angle between ray and midplane
+        # sin_alpha_prime = dz / d
+        # alpha_prime = np.arcsin(sin_alpha_prime)
+
+        alpha_prime = np.arctan2(dz, dr)
+
+        return alpha_prime
 
     def _rho_mid(self, Sigma):
         rho_mid = Sigma / (np.sqrt(2*np.pi) * self._H * AU)   # g/cm^3
@@ -770,9 +931,22 @@ class DeadZoneEOS(IrradiatedEOS):
             & (xe_active > 0.0)
             & (
                 residual
-                <= 1.0e-8 * np.maximum(scale, 1.0e-300)
+                <= 1.0e-6 * np.maximum(scale, 1.0e-300)
             )
         )
+
+        # if not np.all(valid):
+        #     bad = np.where(~valid)[0]
+        #     print(f"xe residual check failed at {len(bad)} cell(s); "
+        #         f"R={self._R[active][bad]}, xe={xe_active[bad]}, "
+        #         f"residual={residual[bad]}, scale={scale[bad]}")
+        #     raise ValueError("Electron-fraction solver failed to converge")
+
+        # if not np.all(valid):
+        #     n_bad = np.sum(~valid)
+        #     import warnings
+        #     warnings.warn(f"_xe: {n_bad} cell(s) failed residual check "
+        #                    f"(likely low-density outer-disc cells)")
         
         # Place our solutions in the radial array, but leave the spots where zeta <= 0 zero 
         xe[active] = xe_active
@@ -906,7 +1080,7 @@ class DeadZoneEOS(IrradiatedEOS):
         Lambda = (self._alpha_t * (cs**2))/(eta * Omega)
         return Lambda 
 
-    def update(self, dt, Sigma, amax=1e-5, star=None):
+    def update(self, dt, Sigma, amax=1e-5, star=None, ionization_model=None):
         """
         Update the EOS with dead zone radius evolution.
         
@@ -926,6 +1100,10 @@ class DeadZoneEOS(IrradiatedEOS):
         None
             Updates internal state: temperature, alpha arrays, dead zone radius
         """
+
+        if ionization_model is None:
+            ionization_model = self._ionization_model
+
         # In ionization mode, first iteration doesn't have a Temperature Profile,
         # so call super with dt = 0.0 (instead of t0 + dt like in next step) to get a Temperature profile
         # TODO: check this makes sense?  -> it doesnt evolve the disk, only solves the thermal balance with brent and update thermodynamics values like H, nu, cs, kappa, Pr 
@@ -936,7 +1114,7 @@ class DeadZoneEOS(IrradiatedEOS):
         self._t_current_yr += dt / yr
         
         # Update dead zone radius at current time
-        self._R_dz = self._compute_R_dz(self._t_current_yr, Sigma)
+        self._R_dz = self._compute_R_dz(self._t_current_yr, Sigma, ionization_model)
         
         # Rebuild the spatial alpha/psi arrays so the viscosity structure
         # follows the moving dead zone (only once a profile has been set)
@@ -1102,20 +1280,42 @@ class DeadZoneEOS(IrradiatedEOS):
         """
         return self._r0
 
-    def _compute_R_dz_ionization(self, Sigma):
+    def _compute_R_dz_ionization(self, Sigma, ionization_model=None):
         """
         Return the dead zone radius computed from ionization fraction.
         """
+
+        if ionization_model is None:
+            ionization_model = self._ionization_model
+
         if self._timer:
-            t0 = time.perf_counter()                          # toggle event timer
+            t0 = time.perf_counter()                      # toggle event timer
 
         R     = self._R                                   # AU
         T     = self._T                                   # K 
         Omega = Omega0 * self._star.Omega_k(R)            # 1/s
         cs    = np.sqrt(GasConst * T / self._mu)          # cm/s
 
-        n = self._n_density(Sigma)                  
-        zeta = self._zeta_CR(Sigma)
+        n = self._n_density(Sigma)  
+        self._n_prev = n
+
+        # Always compute both components separately so CR and XR can be inspected independently
+        zeta_CR = self._zeta_CR(Sigma)
+        zeta_XR = self._zeta_XR(Sigma)
+        self._zeta_CR_prev = zeta_CR
+        self._zeta_XR_prev = zeta_XR
+
+        # Ionization rate calculation
+        if ionization_model == 'CR':             
+            zeta = zeta_CR
+        if ionization_model == 'XR':             
+            zeta = zeta_XR
+        if ionization_model == 'CR+XR':             
+            zeta = zeta_CR + zeta_XR
+        if ionization_model not in ('CR', 'XR', 'CR+XR'):
+            raise ValueError("Invalid ionization model choice")
+
+        self._zeta_prev = zeta                                # save zeta to pass to output
 
         if self._timer:
             tx0 = time.perf_counter()                         # timer toggle start of roots solver
@@ -1127,8 +1327,10 @@ class DeadZoneEOS(IrradiatedEOS):
             tx1 = time.perf_counter()                         # timer toggle end of roots solver
 
         eta  = self._eta(T, xe)                          
+        self._eta_prev = eta
         
         Lambda = self._Elsasser(eta, Omega, cs)           # Lambda(R) -> find where it crosses unity
+        self._Lambda_prev = Lambda
         # Deadzone mask
         deadzone = Lambda <= 1.0
 
@@ -1158,7 +1360,7 @@ class DeadZoneEOS(IrradiatedEOS):
 
         return Rdz
 
-    def _compute_R_dz(self, t, Sigma=None):
+    def _compute_R_dz(self, t, Sigma=None, ionization_model=None):
         """
         Compute dead zone radius at time t using the selected evolution model.
         
@@ -1172,6 +1374,10 @@ class DeadZoneEOS(IrradiatedEOS):
         R_dz : float
             Dead zone radius in AU
         """
+
+        if ionization_model is None:
+            ionization_model = self._ionization_model
+
         if self._evolution_model == 'linear':
             return self._compute_R_dz_linear(t)
         elif self._evolution_model == 'exponential':
@@ -1179,7 +1385,7 @@ class DeadZoneEOS(IrradiatedEOS):
         elif self._evolution_model == 'static':
             return self._compute_R_dz_static(t)
         elif self._evolution_model == 'ionization':
-            return self._compute_R_dz_ionization(Sigma) # Sigma available in update() so ok
+            return self._compute_R_dz_ionization(Sigma, ionization_model) # Sigma available in update() so ok
         else:
             raise ValueError(f"Unknown evolution_model: {self._evolution_model}")
 
@@ -1303,6 +1509,46 @@ class DeadZoneEOS(IrradiatedEOS):
         # balance reads (self._alpha_t and self._psi)
         self._alpha_t = alpha_arr
         self._psi = psi_arr
+
+    def build_alpha_psi_arrays2(self, alpha_SS_DZ, alpha_SS_AZ, psi_DZ, w=1.0):
+        
+        # Resolve the dead-zone scalars. Prefer an explicit argument; otherwise
+        # use the stored scalar (if a profile was already set) or capture from
+        # the current scalar attribute. Never re-read once these are arrays.
+        if alpha_SS_DZ is None:
+            alpha_dead = self._alpha_dead if self._profile_set else self._alpha_t
+        if psi_DZ is None:
+            psi_dead = self._psi_dead if self._profile_set else self._psi
+        
+        # Validate scalar inputs before storing
+        for name, val in (('alpha_dead', alpha_dead), ('alpha_active', alpha_active),
+                          ('psi_dead', psi_dead)):
+            if not np.isscalar(val) or not np.isfinite(val):
+                raise ValueError(f"build_alpha_psi_arrays: {name} must be a finite scalar (got {val!r})")
+        if alpha_dead <= 0 or alpha_active <= 0:
+            raise ValueError("build_alpha_psi_arrays: alpha values must be positive")
+        if psi_dead < 0:
+            raise ValueError("build_alpha_psi_arrays: psi values must be non-negative")
+        if w <= 0:
+            raise ValueError(f"build_alpha_psi_arrays: transition width w must be > 0 (got {w})")
+        
+        # Store the scalar profile (used by update() to rebuild every step)
+        self._alpha_dead = float(alpha_dead)
+        self._alpha_active = float(alpha_active)
+        self._psi_dead = float(psi_dead)
+        self._psi_active = float(psi_active)
+        self._w = float(w)
+        self._profile_set = True
+        
+        # Build the spatial arrays at the current dead zone radius
+        self._rebuild_alpha_psi()
+        
+        print(f"Built alpha/psi arrays with tanh transition:")
+        print(f"  alpha_dead={self._alpha_dead:.6e}, alpha_active={self._alpha_active:.6e}")
+        print(f"  psi_dead={self._psi_dead:.6e}, psi_active={self._psi_active:.6e}")
+        print(f"  R_dz={self._R_dz:.4f} AU, transition width w={self._w:.4f} scale heights")
+
+
 
     def ASCII_header(self):
         """DeadZoneEOS header.
