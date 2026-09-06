@@ -30,6 +30,8 @@ import time
 start_time = time.time()
 plt.rcParams.update({'font.size': 16})
 
+from DiscEvolution.solvers import *
+
 
 gas_solver=ViscousEvolutionFV
 
@@ -153,204 +155,9 @@ def run_model(config, cli_output_dir=None):
     else:
         kappa = Zhu2012
 
-    if grid_params['type'] == 'Booth-alpha':
-        # For fixed Rd, Mdot and Mdisk, solve for alpha
-    
-        # extract params
-        Mdot=disc_params['Mdot']
-        Mdisk=disc_params['M']
-        alpha=disc_params['alpha']
-        Rd=disc_params['Rd']
-        R = grid.Rc
+    # removed other solver types for simplicity 
 
-        def Sigma_profile(R, Rd, Mdisk):
-            """Function that creates a non-steady state Sigma profile for gamma=1, scaled such that the disk mass equals Mdisk"""
-            Sigma = (Rd/R) * np.exp(-R/Rd)
-            Sigma *= Mdisk / (np.trapezoid(Sigma, np.pi * (R * AU)**2)/Msun)
-            return Sigma
-    
-        # define an initial guess for the Sigma profile
-        Sigma = Sigma_profile(R, Rd, Mdisk)
-    
-        # define a gas class, to be used later 
-        gas_temp = gas_solver()
-
-        # iterate to get alpha
-        for j in range(100):
-            # Create the EOS
-            if eos_params["type"] == "SimpleDiscEOS":
-                eos = SimpleDiscEOS(star, alpha_t=alpha)
-            elif eos_params["type"] == "LocallyIsothermalEOS":
-                eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha)
-            elif eos_params["type"] == "IrradiatedEOS":
-                eos = IrradiatedEOS(star, alpha_t=alpha, kappa=kappa, Tmax=eos_params["Tmax"])
-        
-            # update eos with current sigma profile
-            eos.set_grid(grid)
-            eos.update(0, Sigma)
-
-            # define a disc given current eos and Sigma
-            disc = AccretionDisc(grid, star, eos, Sigma)
-
-            # find the current Mdot in the disc
-            Mdot_actual = disc.Mdot(gas_temp.viscous_velocity(disc, Sigma))
-
-            # scale Sigma by Mdot to get desired Mdot.
-            Sigma_new = Sigma*Mdot/Mdot_actual[0]
-            Sigma = 0.5 * (Sigma + Sigma_new) # average done to damp oscillations in numerical solution
-
-            # define new disc given new Sigma profile
-            disc = AccretionDisc(grid, star, eos, Sigma)
-
-            # scale alpha by Mdisk so that desired disk mass is achieved.
-            alpha= alpha*(disc.Mtot()/Msun)/Mdisk
-
-            if grid_params["smart_binning"]:
-                # if using smart binning, re-create the grid and Sigma profile
-                cutoff = np.where(Sigma < 1e-7)[0]
-                
-                if cutoff.shape == (0,):
-                    continue
-
-                grid_params['rmax'] = grid.Rc[cutoff[0]]
-                grid_params['nr'] = cutoff[0]
-                grid = Grid(grid_params['rmin'], grid_params['rmax'], grid_params['nr'], spacing=grid_params['spacing'])
-                Sigma = np.split(Sigma, [cutoff[0]])[0]
-
-    elif grid_params['type'] == 'Booth-Rd':
-        # For fixed alpha, Mdot and Mdisk, solve for Rd
-    
-        # extract params
-        Mdot=disc_params['Mdot']
-        Mdisk=disc_params['M']
-        alpha=disc_params['alpha']
-        Rd=disc_params['Rd'] # initial guess
-        R = grid.Rc
-
-        def Sigma_profile(R, Rd, Mdisk):
-            """Function that creates a non-steady state Sigma profile for gamma=1, scaled such that the disk mass equals Mdisk"""
-            Sigma = (Rd/R) * np.exp(-R/Rd)
-            Sigma *= Mdisk / (np.trapezoid(Sigma, np.pi * (R * AU)**2)/Msun)
-            return Sigma
-    
-        # create an initial Sigma profile, scale by Mdisk
-        Sigma = Sigma_profile(R, Rd, Mdisk)
-
-        # Create the EOS
-        if eos_params["type"] == "SimpleDiscEOS":
-            eos = SimpleDiscEOS(star, alpha_t=alpha)
-        elif eos_params["type"] == "LocallyIsothermalEOS":
-            eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha)
-        elif eos_params["type"] == "IrradiatedEOS":
-            eos = IrradiatedEOS(star, alpha_t=alpha, kappa=kappa, Tmax=eos_params["Tmax"])
-        
-        # update eos with guess Sigma
-        eos.set_grid(grid)
-        eos.update(0, Sigma)
-    
-        # define gas classe to be used in first iteration
-        gas_temp = gas_solver()
-
-        # iterate to get Rd
-        for j in range(100):
-            # initialize a disc with current Sigma and eos
-            disc = AccretionDisc(grid, star, eos, Sigma)
-
-            # find Mdot under current parameters
-            Mdot_actual = disc.Mdot(gas_temp.viscous_velocity(disc, S=Sigma))
-
-            # Scale Sigma to achieve the desired Mdot
-            Sigma_new = Sigma*Mdot/Mdot_actual[0]
-            Sigma = 0.5 * (Sigma + Sigma_new) # average done to damp oscillations in numerical solution
-
-            # define a disk with new Sigma profile, use to scale R_d by disk mass
-            disc = AccretionDisc(grid, star, eos, Sigma)
-            Rd_new= Rd*np.sqrt(Mdisk/(disc.Mtot()/Msun))
-            Rd = 0.5 * (Rd + Rd_new) # average done to damp oscillations in numerical solution
-
-            # define new Sigma profile given new Rd
-            Sigma = Sigma_profile(R, Rd, Mdisk)
-
-            # update eos with new Sigma to have correct temperature profile
-            eos.update(0, Sigma)
-
-    elif grid_params['type'] == "LBP":
-        # define viscous evolution to calculate drift velocity later
-        gas = gas_solver()
-
-        # extract parameters
-        gamma=disc_params['gamma']
-        R = grid.Rc
-        Rd=disc_params['Rd']
-        Mdot=disc_params['Mdot']* Msun/yr 
-        Mdisk=disc_params['M']* Msun
-        alpha=disc_params['alpha']
-        mu=chemistry_params['mu']
-        rin=R[0]
-        xin=R[0]/Rd
-
-        # calculate the keplerian velocity
-        fin=np.exp(-xin**(2.-gamma))*(1.-2.*(2.-gamma)*xin**(2.-gamma))
-        nud_goal=(Mdot/Mdisk)*(2.*Rd*Rd)/(3.*(2.-gamma))/fin*AU*AU #cm^2
-        nud_cgs=nud_goal*yr/3.15e7
-        Om_invsecond=star.Omega_k(Rd)*yr/3.15e7
-
-        # calculate initial sound speed and temperature profile
-        cs0 = np.sqrt(Om_invsecond*nud_cgs/alpha) #cm/s
-        Td=cs0*cs0*mu*m_p/k_B #KT=Td*(R/Rd)**(gamma-1.5)
-        T=Td*(R/Rd)**(gamma-1.5)
-
-        # calculate the actual sound speed and surface density profile
-        cs = np.sqrt(GasConst * T / mu) #cgs
-        cs0 = np.sqrt(GasConst * Td / mu) #cgs
-        nu=alpha*cs*cs/(star.Omega_k(R)*yr/3.15e7) # cm2/s
-        nud=np.interp(Rd,grid.Rc,nu)*3.15e7/yr # cm^2 
-        Sigma=LBP_Solution(Mdisk,Rd*AU,nud,gamma=gamma)
-        Sigma0=Sigma(R*AU,0) 
-
-        # Adjust alpha so initial Mdot is correct
-        for i in range(10):
-            # define an EOS
-            eos = IrradiatedEOS(star, alpha_t=disc_params['alpha'], kappa=kappa, Tmax=eos_params["Tmax"])
-            eos.set_grid(grid)
-            eos.update(0, Sigma0)
-
-            # define a temporary disc to compute Mdot
-            disc = AccretionDisc(grid, star, eos, Sigma0)
-
-            # adjust alpha depending on current Mdot and wanted Mdot
-            vr=gas.viscous_velocity(disc,Sigma0)
-            Mdot_actual=disc.Mdot(vr[0])#* (Msun / yr)
-            alpha=alpha*(Mdot/Msun*yr)/Mdot_actual
-        Sigma = Sigma0
-
-    elif grid_params['type'] == 'Booth-Mdot':
-        # For fixed alpha, Rd, and Mdisk, solve for Mdot
-    
-        # extract parameters
-        R = grid.Rc
-        Rd=disc_params['Rd']
-        Mdot=disc_params['Mdot']* Msun/yr # initial guess
-        Mdisk=disc_params['M']
-        alpha=disc_params['alpha']
-
-        # define Sigma profile, scale by Mdisk to get correct disk mass.
-        Sigma = (Rd/R) * np.exp(-R/Rd)
-        Sigma *= Mdisk / (np.trapezoid(Sigma, np.pi * (R * AU)**2)/Msun)
-
-        # Create the EOS
-        if eos_params["type"] == "SimpleDiscEOS":
-            eos = SimpleDiscEOS(star, alpha_t=alpha)
-        elif eos_params["type"] == "LocallyIsothermalEOS":
-            eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha)
-        elif eos_params["type"] == "IrradiatedEOS":
-            eos = IrradiatedEOS(star, alpha_t=alpha, kappa=kappa, Tmax=eos_params["Tmax"])
-        
-        # update the eos with relevant values
-        eos.set_grid(grid)
-        eos.update(0, Sigma)
-
-    elif grid_params['type'] == 'winds-alpha':
+    if grid_params['type'] == 'winds-alpha':
         # For fixed Rd, Mdot and Mdisk, solve for alpha with disk winds
         # assumes gamma = 1 #TODO: Check if outdated comment
 
@@ -446,113 +253,34 @@ def run_model(config, cli_output_dir=None):
             disc = AccretionDisc(grid, star, eos, Sigma)
 
             # solve the dead-zone (interior) accretion alpha for the target Mdot
-            eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)    #TODO: this function returns an alpha value, doesnt set anything, so does this do nothing? 
+            # eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)
+
+            # instead of above, solve the interior psi for target Mdot
+            psi_dead = psi_from_alphaSS_Mdot(eos, disc, gas_temp, Mdot)    
+            alpha_SS_dead = eos_params["alpha_SS_dead"]
+            alpha_DW = psi_dead * alpha_SS_dead
+            alpha_SS_active = eos_params["alpha_SS_active"]
+            psi_active = alpha_DW / alpha_SS_active
 
             # lay down the spatial dead/active alpha & psi profile
+            # eos.build_alpha_psi_arrays(
+            #     alpha_active=eos_params["alpha_active"],
+            #     psi_active=eos_params.get("psi_active", 0.01),
+            #     w=eos_params.get("w", 1.0),
+            # )
+
             eos.build_alpha_psi_arrays(
-                alpha_active=eos_params["alpha_active"],
-                psi_active=eos_params.get("psi_active", 0.01),
+                alpha_dead=alpha_SS_dead,
+                alpha_active=alpha_SS_active,
+                psi_dead=psi_dead,
+                psi_active=psi_active,
                 w=eos_params.get("w", 1.0),
             )
+
             eos.update(0, Sigma)
             disc = AccretionDisc(grid, star, eos, Sigma)
 
-    elif grid_params['type'] == 'winds-Rd':
-        # For fixed alpha, Mdot and Mdisk, solve for Rd with disk winds
-    
-        # extract params
-        Mdot=disc_params['Mdot'] # solar masses per year
-        Mdisk=disc_params['M']* Msun
-        psi = wind_params['psi_DW']
-        #lambda_DW = wind_params['lambda_DW']
-        Rd=disc_params['Rd']
-        alpha = disc_params['alpha']
-        Sc = disc_params["Sc"]
-        gamma = disc_params['gamma']
-        e_rad = wind_params["e_rad"]
-        lambda_DW = 1/(2*(1 - e_rad)*(3/psi + 1)) + 1 
-        R = grid.Rc
-        alpha_SS = alpha/(1 + psi)
-
-        def Sigma_profile(R, Rd, Mdisk):
-            """Creates a non-steady state Sigma profile for gamma=1, scaled such that the disk mass equals Mdisk"""
-            chi = 0.25 * (1 + psi) * (np.sqrt(1 + 4*psi/((lambda_DW - 1) * (psi + 1)**2)) - 1)
-            Sigma = (R/Rd)**(chi - gamma) * np.exp(-(R/Rd)**(2 - gamma))
-            Sigma *= Mdisk / np.trapezoid(Sigma, np.pi * (R * AU)**2)
-            return Sigma
-    
-        # create an initial Sigma profile, scale by Mdisk
-        Sigma = Sigma_profile(R, Rd, Mdisk)
-
-        # Create the EOS
-        if eos_params["type"] == "SimpleDiscEOS":
-            eos = SimpleDiscEOS(star, alpha_t=alpha_SS)
-        elif eos_params["type"] == "LocallyIsothermalEOS":
-            eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha_SS)
-        elif eos_params["type"] == "IrradiatedEOS":
-            eos = IrradiatedEOS(star, alpha_t=alpha_SS, kappa=kappa, Tmax=eos_params["Tmax"])
-        
-        # update eos with guess Sigma
-        eos.set_grid(grid)
-        eos.update(0, Sigma)
-    
-        # define gas classe to be used in first iteration
-        gas_temp = HybridWindModel(psi, lambda_DW)
-
-        # iterate to get Rd
-        for j in range(100):
-            # initialize a disc with current Sigma and eos
-            disc = AccretionDisc(grid, star, eos, Sigma)
-
-            # find Mdot under current parameters
-            Mdot_actual = disc.Mdot(gas_temp.viscous_velocity(disc, S=Sigma))
-
-            # Scale Sigma to achieve the desired Mdot
-            Sigma_new = Sigma*Mdot/Mdot_actual[0]
-            Sigma = 0.5 * (Sigma + Sigma_new) # average done to damp oscillations in numerical solution
-
-            # define a disk with new Sigma profile, use to scale R_d by disk mass
-            disc = AccretionDisc(grid, star, eos, Sigma)
-            Rd_new= Rd*np.sqrt(Mdisk/disc.Mtot())
-            Rd = 0.5 * (Rd + Rd_new) # average done to damp oscillations in numerical solution
-
-            # define new Sigma profile given new Rd
-            Sigma = Sigma_profile(R, Rd, Mdisk)
-
-            # update eos with new Sigma to have correct temperature profile
-            eos.update(0, Sigma)
-
-    elif grid_params['type'] == 'winds-Mdot':
-        # For fixed alpha, Rd, and Mdisk, solve for Mdot with disk winds included
-    
-        # extract parameters
-        R = grid.Rc
-        Rd=disc_params['Rd']
-        Mdot=disc_params['Mdot'] # initial guess
-        Mdisk=disc_params['M']
-        alpha=disc_params['alpha']
-        psi = wind_params['psi_DW']
-        e_rad = wind_params["e_rad"]
-        lambda_DW = 1/(2*(1 - e_rad)*(3/psi + 1)) + 1 
-        gamma = disc_params['gamma']
-        alpha_SS = alpha/(1+psi)
-
-        # define Sigma profile, scale by Mdisk to get correct disk mass.
-        chi = 0.25 * (1 + psi) * (np.sqrt(1 + 4*psi/((lambda_DW - 1) * (psi + 1)**2)) - 1)
-        Sigma = (R/Rd)**(chi - gamma) * np.exp(-(R/Rd)**(2 - gamma))
-        Sigma *= Mdisk / (np.trapezoid(Sigma, np.pi * (R * AU)**2)/Msun)
-
-        # Create the EOS
-        if eos_params["type"] == "SimpleDiscEOS":
-            eos = SimpleDiscEOS(star, alpha_t=alpha_SS)
-        elif eos_params["type"] == "LocallyIsothermalEOS":
-            eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha_SS)
-        elif eos_params["type"] == "IrradiatedEOS":
-            eos = IrradiatedEOS(star, alpha_t=alpha_SS, kappa=kappa, psi=psi, e_rad=e_rad, Tmax=eos_params["Tmax"])
-        
-        # update the eos with relevant values
-        eos.set_grid(grid)
-        eos.update(0, Sigma)
+    # Removed other solvers for simplicity 
 
     # Set up dynamics
     # ========================
