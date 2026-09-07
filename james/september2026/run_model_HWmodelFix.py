@@ -172,7 +172,7 @@ def run_model(config, cli_output_dir=None):
         # Bootstrap-only guess: used solely to converge the initial Sigma
         # profile via a scalar IrradiatedEOS surrogate. This value is fully
         # discarded once the real DeadZoneEOS/psi solve runs afterwards
-        alpha_boot = eos_params["alpha_SS_dead"]
+        alpha_boot = eos_params["alpha_SS_dead"]        # Bootstrap should start from the known dead-zone alpha
         psi_boot = 1.0
         lambda_DW_boot = 1/(2*(1 - e_rad)*(3/psi_boot + 1)) + 1
 
