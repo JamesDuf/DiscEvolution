@@ -242,7 +242,7 @@ def run_model(config, cli_output_dir=None):
                 star,
                 psi=psi, 
                 Mdot=Mdot,
-                alpha_guess=alpha_SS,
+                alpha_guess=alpha_SS_dead,          # use the alpha_SS dead given as free parameter not the old alpha_SS that was being passed in the JSON 
                 evolution_model=eos_params["evolution_model"],
                 ionization_model=eos_params["ionization_model"],         #TODO: document this addition
                 r0=eos_params.get("r0"), 
