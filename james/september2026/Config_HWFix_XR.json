@@ -40,8 +40,8 @@
         "r_floor": null,
         "t0": null,
         "t1": null,
-        "alpha_active": 0.000130915625561834,
-        "psi_active": 0.01,
+        "alpha_SS_dead": 1.0e-4,
+        "alpha_SS_active": 0.000130915625561834,    
         "w": 1.0,
         "warm_start": true
     },
@@ -87,7 +87,6 @@
     },
     "winds": {
         "on": true,
-        "psi_DW": 10.0,
         "e_rad": 0.9
     }
 }
