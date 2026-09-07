@@ -491,6 +491,24 @@ class HybridWindModel(object):
 
         return self._tol * min(t_visc, t_wind)
 
+    def set_wind_parameters(self, psi_DW, lambda_DW):
+        """Update scalar or radial wind parameters.
+        
+        Parameters:
+        -----------
+        psi_DW : float or ndarray
+            Wind torque parameter (scalar or per-cell array).
+        lambda_DW : float or ndarray
+            Wind lever arm (scalar or per-cell array).
+        """
+        self._psi = np.asarray(psi_DW, dtype=float)
+        self._lambda = np.asarray(lambda_DW, dtype=float)
+
+        if np.any(self._psi < 0):
+            raise ValueError("psi_DW must be non-negative")
+        if np.any(self._lambda <= 1):
+            raise ValueError("lambda_DW must be greater than 1 (mass cannot be removed from the disc at a negative rate)")
+
     def __call__(self, dt, disc, tracers=[], adv=[]):
         """Compute one step of the evolution equation
         args:
