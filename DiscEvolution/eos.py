@@ -543,7 +543,7 @@ class DeadZoneEOS(IrradiatedEOS):
         # alpha solver
         psi,
         Mdot,
-        alpha_guess = 1e-3,
+        alpha_guess,
 
         # Deadzone radius evolution
         evolution_model = 'linear',
@@ -671,11 +671,12 @@ class DeadZoneEOS(IrradiatedEOS):
         R_cm = self._R * AU                 # cm
         
         # Approximate Chiang-style disk surface height
-        z_surface = 4.0 * self._H * AU      # cm 
+        # z_surface = 4.0 * self._H * AU      # cm 
 
         # Vector from X-ray source to disk surface
         dr = R_cm - source_R                # cm    
-        dz = z_surface - source_z           # cm
+        # dz = z_surface - source_z           # cm
+        dz = source_z 
 
         # Straight-line distance from source to disk surface
         d = np.sqrt(dr**2 + dz**2)          # cm
