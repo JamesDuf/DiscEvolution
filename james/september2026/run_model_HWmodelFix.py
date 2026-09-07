@@ -271,16 +271,11 @@ def run_model(config, cli_output_dir=None):
                 Mdot,
             )    
             
+            # Constant alpha_DW throughout the disc
             alpha_DW = psi_dead * alpha_SS_dead
             
+            # Since alpha_DW is constant, psi varies where alpha_SS varies
             psi_active = alpha_DW / alpha_SS_active
-
-            # lay down the spatial dead/active alpha & psi profile
-            # eos.build_alpha_psi_arrays(
-            #     alpha_active=eos_params["alpha_active"],
-            #     psi_active=eos_params.get("psi_active", 0.01),
-            #     w=eos_params.get("w", 1.0),
-            # )
 
             eos.build_alpha_psi_arrays(
                 alpha_dead=alpha_SS_dead,
@@ -290,8 +285,14 @@ def run_model(config, cli_output_dir=None):
                 w=eos_params.get("w", 1.0),
             )
 
+            # Recompute the final thermodynamic and ionisation state
             eos.update(0, Sigma)
             disc = AccretionDisc(grid, star, eos, Sigma)
+
+            # Recompute the wind lever arm consistently with the solved dead-zone psi.
+            psi_profile = np.asarray(eos._psi, dtype=float)     
+            psi_safe = np.clip(psi_profile, 1e-8, None)         # safe for division by zero
+            lambda_DW = 1.0 / ( 2.0*(1.0 - e_rad)*(3.0/psi_profile + 1.0) ) + 1.0
 
     # Removed other solvers for simplicity 
 
