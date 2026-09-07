@@ -199,7 +199,7 @@ def run_model(config, cli_output_dir=None):
                 # DeadZoneEOS uses an IrradiatedEOS surrogate here to converge the
                 # Sigma profile / disc mass with a scalar alpha; the real
                 # DeadZoneEOS (with its spatial profile) is built after the loop.
-                eos = IrradiatedEOS(star, alpha_t=alpha_boot, kappa=kappa, psi=psi, e_rad=e_rad, Tmax=eos_params["Tmax"])
+                eos = IrradiatedEOS(star, alpha_t=alpha_boot, kappa=kappa, psi=psi_boot, e_rad=e_rad, Tmax=eos_params["Tmax"])
             
             # update eos with grid and Sigma
             eos.set_grid(grid)
