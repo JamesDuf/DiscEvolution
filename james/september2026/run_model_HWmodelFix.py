@@ -292,7 +292,7 @@ def run_model(config, cli_output_dir=None):
             # Recompute the wind lever arm consistently with the solved dead-zone psi.
             psi_profile = np.asarray(eos._psi, dtype=float)     
             psi_safe = np.clip(psi_profile, 1e-8, None)         # safe for division by zero
-            lambda_DW = 1.0 / ( 2.0*(1.0 - e_rad)*(3.0/psi_profile + 1.0) ) + 1.0
+            lambda_DW = 1.0 / ( 2.0*(1.0 - e_rad)*(3.0/psi_safe + 1.0) ) + 1.0
 
     # Removed other solvers for simplicity 
 
@@ -301,7 +301,10 @@ def run_model(config, cli_output_dir=None):
     gas = None
     if transport_params['gas_transport']:
         if wind_params["on"]:
-            gas = HybridWindModel(wind_params['psi_DW'], lambda_DW)
+            gas = HybridWindModel(
+                psi_profile, 
+                lambda_DW,
+            )
         else:
             gas = gas_solver()
     
