@@ -971,6 +971,13 @@ def run_model(config, cli_output_dir=None):
                     if planet_params['include_planets']:
                         planet_model.integrate(dt, planets)
                     disc.update(dt)
+
+                    # Refresh wind model with updated EOS psi/lambda profile
+                    if transport_params['gas_transport'] and wind_params["on"]:
+                        psi_profile = np.asarray(disc._eos._psi, dtype=float)
+                        psi_safe = np.clip(psi_profile, 1e-8, None)
+                        lambda_profile = 1.0 + 1.0 / ( 2.0*(1.0 - wind_params["e_rad"])*(3.0/psi_safe + 1.0) )
+                        disc._gas.set_wind_parameters(psi_safe, lambda_profile)         # updates the HybridWindModel object's psi and LambdaDW temporally and radially 
                     
                     t += dt
                     n += 1
