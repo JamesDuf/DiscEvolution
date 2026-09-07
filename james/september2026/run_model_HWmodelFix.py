@@ -852,6 +852,13 @@ def run_model(config, cli_output_dir=None):
                 fig_live.canvas.draw()
                 fig_live.canvas.flush_events()
 
+            # Ensure wind model reflects the initial EOS profile                #TODO check if this can be removed but might not affect performance
+            if transport_params['gas_transport'] and wind_params["on"]:
+                psi_profile = np.asarray(disc._eos._psi, dtype=float)
+                psi_safe = np.clip(psi_profile, 1e-8, None)
+                lambda_profile = 1.0 + 1.0 / ( 2.0*(1.0 - wind_params["e_rad"])*(3.0/psi_safe + 1.0) )
+                disc._gas.set_wind_parameters(psi_safe, lambda_profile)
+
             # --------------- Main integration loop ---------------
             # Track wall-clock per step to estimate time to completion
             sim_advanced = 0.0  # total simulated time advanced (code units)
