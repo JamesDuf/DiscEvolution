@@ -257,12 +257,21 @@ def run_model(config, cli_output_dir=None):
             eos.set_grid(grid)
             eos.update(0, Sigma)
 
+            # Rebuild disc so it actually points at the new DeadZoneEOS
+            # (alpha_SS_dead), not the stale surrogate IrradiatedEOS.
+            disc = AccretionDisc(grid, star, eos, Sigma)
+
+            # Fresh wind model for the solver — psi here is just an initial
+            # guess; the solver should be varying it, not gas_temp's psi
+            # left over from the bootstrap.
+            gas_dead = HybridWindModel(psi_boot, lambda_DW_boot)
+
             # solve the interior (dead-zone) psi for target Mdot, holding
             # alpha_SS_dead fixed at its config value
             psi_dead = psi_from_alphaSS_Mdot(
                 eos, 
                 disc, 
-                gas_temp, 
+                gas_dead, 
                 Mdot,
             )    
             
