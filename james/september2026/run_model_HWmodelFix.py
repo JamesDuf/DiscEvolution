@@ -484,10 +484,10 @@ def run_model(config, cli_output_dir=None):
     # ========================
     t = 0
     n = 0
-    if (alpha_SS > 0.1) or (alpha_SS<1.e-5):
-        print("Not Running model - alphaSS out of range.  Alpha, Rd, Mdisk=", eos._alpha_t, Rd, disc.Mtot()/Msun)
+    if (alpha_SS_dead > 0.1) or (alpha_SS_dead<1.e-5):          
+        print("Not Running model - alpha_SS_dead out of range.  Alpha, Rd, Mdisk=",  alpha_SS_dead, Rd, disc.Mtot()/Msun)
     else:
-        print("Running model.  Alpha, Rd, Mdisk=", eos.alpha, Rd, disc.Mtot()/Msun)
+        print("Running model.  Alpha_SS_dead, Rd, Mdisk=", alpha_SS_dead, Rd, disc.Mtot()/Msun)
 
         # Output filename (HDF5)
         # Priority: CLI argument > environment variable > config file > default
@@ -495,7 +495,7 @@ def run_model(config, cli_output_dir=None):
         os.makedirs(output_dir, exist_ok=True)
         
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"winds_mig_psi{wind_params['psi_DW']}_Mdot{disc_params['Mdot']:.1e}_M{disc_params['M']:.1e}_Rd{disc_params['Rd']:.1e}_{timestamp}.h5"
+        filename = f"winds_mig_psi{psi_dead:.3e}_Mdot{disc_params['Mdot']:.1e}_M{disc_params['M']:.1e}_Rd{disc_params['Rd']:.1e}_{timestamp}.h5"
         outfile = os.path.join(output_dir, filename)
 
         with h5py.File(outfile, "w") as h5f:
@@ -507,7 +507,11 @@ def run_model(config, cli_output_dir=None):
             h5f.create_dataset("Tc", shape=(0,), maxshape=(None,), dtype="f8")
             h5f.create_dataset("Sigc", shape=(0,), maxshape=(None,), dtype="f8")
             h5f.create_dataset("R_dz_t", shape=(0,), maxshape=(None,), dtype="f8")
-            h5f.attrs["alpha_SS"] = float(alpha_SS)
+            h5f.attrs["alpha_SS_dead"] = float(alpha_SS_dead)
+            h5f.attrs["alpha_SS_active"] = float(alpha_SS_active)
+            h5f.attrs["psi_dead"] = float(psi_dead)
+            h5f.attrs["psi_active"] = float(psi_active)
+            h5f.attrs["alpha_DW"] = float(alpha_DW)
 
             # Per-planet extendable datasets
 
