@@ -259,13 +259,17 @@ def run_model(config, cli_output_dir=None):
             )
             eos.set_grid(grid)
             eos.update(0, Sigma)
-            disc = AccretionDisc(grid, star, eos, Sigma)
 
             # solve the dead-zone (interior) accretion alpha for the target Mdot
             # eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)
 
             # instead of above, solve the interior psi for target Mdot
-            psi_dead = psi_from_alphaSS_Mdot(eos, disc, gas_temp, Mdot)    
+            psi_dead = psi_from_alphaSS_Mdot(
+                eos, 
+                disc, 
+                gas_temp, 
+                Mdot,
+            )    
             
             alpha_DW = psi_dead * alpha_SS_dead
             
