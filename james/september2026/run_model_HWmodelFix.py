@@ -163,26 +163,27 @@ def run_model(config, cli_output_dir=None):
         # extract params
         Mdot=disc_params['Mdot'] # solar masses per year
         Mdisk=disc_params['M']* Msun
-        psi = wind_params['psi_DW']
-        #lambda_DW = wind_params['lambda_DW']
         Rd=disc_params['Rd']
-        alpha = disc_params['alpha']                # remove
         e_rad=wind_params["e_rad"]
         Sc = disc_params["Sc"]
         gamma = disc_params['gamma']
-        lambda_DW = 1/(2*(1 - e_rad)*(3/psi + 1)) + 1 
         R = grid.Rc
-        alpha_SS = alpha/(1 + psi)
+
+        # Bootstrap-only guess: used solely to converge the initial Sigma
+        # profile via a scalar IrradiatedEOS surrogate. This value is fully
+        # discarded once the real DeadZoneEOS/psi solve runs afterwards
+        alpha_boot = eos_params["alpha_SS_dead"]
+        psi_boot = 1.0
+        lambda_DW_boot = 1/(2*(1 - e_rad)*(3/psi_boot + 1)) + 1
 
         # initial guess for Sigma
         Sigma_d = Mdisk/(2 * np.pi * (Rd*AU)**2)
-        #xi = 0.25 * (1 + psi) * (np.sqrt(1 + 4*psi/((lambda_DW - 1) * (psi + 1)**2)) - 1)
         xi = 0
         Sigma = Sigma_d * (R/Rd)**(xi - gamma) * np.exp(-(R/Rd)**(2 - gamma))
 
         # define an initial disc and gas class to be used later
         disc = AccretionDisc(grid, star, eos=None, Sigma=Sigma)
-        gas_temp = HybridWindModel(psi, lambda_DW)
+        gas_temp = HybridWindModel(psi_boot, lambda_DW_boot)
 
         # scale Sigma by current Mtot just in case Sigma is not quite at the correct value to have the desired Mdisk (which often happens)
         Mtot = disc.Mtot()
@@ -191,14 +192,14 @@ def run_model(config, cli_output_dir=None):
         for i in range(100):
             # Create the EOS
             if eos_params["type"] == "SimpleDiscEOS":
-                eos = SimpleDiscEOS(star, alpha_t=alpha_SS)
+                eos = SimpleDiscEOS(star, alpha_t=alpha_boot)
             elif eos_params["type"] == "LocallyIsothermalEOS":
-                eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha_SS)
+                eos = LocallyIsothermalEOS(star, eos_params['h0'], eos_params['q'], alpha_boot)
             elif eos_params["type"] in ("IrradiatedEOS", "DeadZoneEOS"):
                 # DeadZoneEOS uses an IrradiatedEOS surrogate here to converge the
                 # Sigma profile / disc mass with a scalar alpha; the real
                 # DeadZoneEOS (with its spatial profile) is built after the loop.
-                eos = IrradiatedEOS(star, alpha_t=alpha_SS, kappa=kappa, psi=psi, e_rad=e_rad, Tmax=eos_params["Tmax"])
+                eos = IrradiatedEOS(star, alpha_t=alpha_boot, kappa=kappa, psi=psi, e_rad=e_rad, Tmax=eos_params["Tmax"])
             
             # update eos with grid and Sigma
             eos.set_grid(grid)
@@ -211,12 +212,9 @@ def run_model(config, cli_output_dir=None):
             vr = gas_temp.viscous_velocity(disc,Sigma)
             Mdot_actual = disc.Mdot(vr)[0] # solar masses per year
 
-            # Scale alpha by Mdo/t
-            alpha_new = alpha*Mdot/Mdot_actual
-            alpha = 0.5 * (alpha + alpha_new) # average done to damp oscillations in numerical solution
-
-            # find a new alpha_SS given new alpha.
-            alpha_SS = alpha/(1 + psi)
+            # Scale alpha_boot directly by target/actual Mdot
+            alpha_boot_new = alpha_boot*Mdot/Mdot_actual
+            alpha_boot = 0.5 * (alpha_boot + alpha_boot_new) # average done to damp oscillations in numerical solution
 
             if grid_params["smart_binning"]:
                 # if using smart binning, re-create the grid and Sigma profile
@@ -240,7 +238,7 @@ def run_model(config, cli_output_dir=None):
 
             eos = DeadZoneEOS(
                 star,
-                psi=psi, 
+                psi=psi_boot, 
                 Mdot=Mdot,
                 alpha_guess=alpha_SS_dead,          # use the alpha_SS dead given as free parameter not the old alpha_SS that was being passed in the JSON 
                 evolution_model=eos_params["evolution_model"],
@@ -254,16 +252,13 @@ def run_model(config, cli_output_dir=None):
                 kappa=kappa, 
                 e_rad=e_rad, 
                 Tmax=eos_params["Tmax"],
-                warm_start=eos_params.get("warm_start", 
-                True),
+                warm_start=eos_params.get("warm_start", True),
             )
             eos.set_grid(grid)
             eos.update(0, Sigma)
 
-            # solve the dead-zone (interior) accretion alpha for the target Mdot
-            # eos.alpha_from_Mdot_psi(disc, gas_temp, Mdot)
-
-            # instead of above, solve the interior psi for target Mdot
+            # solve the interior (dead-zone) psi for target Mdot, holding
+            # alpha_SS_dead fixed at its config value
             psi_dead = psi_from_alphaSS_Mdot(
                 eos, 
                 disc, 
@@ -271,7 +266,8 @@ def run_model(config, cli_output_dir=None):
                 Mdot,
             )    
             
-            # Constant alpha_DW throughout the disc
+            # Constant alpha_DW throughout the disc derived from the solved
+            # dead-zone psi and the (fixed) dead-zone alpha_SS.
             alpha_DW = psi_dead * alpha_SS_dead
             
             # Since alpha_DW is constant, psi varies where alpha_SS varies
