@@ -600,6 +600,12 @@ def run_model(config, cli_output_dir=None):
             h5f.create_dataset("Sigma_grain_size", shape=(0, nR), maxshape=(None, nR), dtype="f8")
             h5f.create_dataset("R_dz", shape=(0,), maxshape=(None,), dtype="f8")
             
+            # v_r and Mdot_r
+            nR_faces = nR - 1  # Add this line
+            h5f.create_dataset("v_r", shape=(0, nR_faces), maxshape=(None, nR_faces), dtype="f8")
+            h5f.create_dataset("Mdot_r", shape=(0, nR_faces), maxshape=(None, nR_faces), dtype="f8")
+            h5f.create_dataset("R_faces", data=(grid.Rc[:-1] + grid.Rc[1:]) / 2.0)
+
             # ==================================================
             # Initial write at t = 0 (if not already included in tinterval)
             # ==================================================
@@ -1145,6 +1151,18 @@ def run_model(config, cli_output_dir=None):
                 h5f["Sigma_grain_size"].resize(s + 1, axis=0);      h5f["Sigma_grain_size"][s, :] = disc.grain_size[0]
                 _R_dz_val = getattr(disc._eos, "_R_dz", np.nan)
                 h5f["R_dz"].resize(s + 1, axis=0);                  h5f["R_dz"][s]           = float(_R_dz_val) if _R_dz_val is not None else np.nan
+
+                # Add v_r and Mdot_r computation and save them 
+                vr = disc._gas.viscous_velocity(disc, disc.Sigma)
+                Sig_faces = (disc.Sigma[:-1] + disc.Sigma[1:]) / 2.0
+                R_faces = (disc.grid.Rc[:-1] + disc.grid.Rc[1:]) / 2.0
+
+                h5f["v_r"].resize(s + 1, axis=0)
+                h5f["v_r"][s, :] = vr
+
+                Mdot_r = -2.0 * np.pi * (R_faces * AU) * Sig_faces * vr * (yr / Msun)
+                h5f["Mdot_r"].resize(s + 1, axis=0)
+                h5f["Mdot_r"][s, :] = Mdot_r
 
                 h5f.flush()
 
