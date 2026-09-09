@@ -1025,7 +1025,8 @@ def run_model(config, cli_output_dir=None):
                         print(f"\rETA: {eta_hours:02d}::{eta_minutes:02d} (h::m)", flush=True)
 
                     # --- every 5 steps: stream per-planet series ---
-                    if planet_params['include_planets'] and (n % 5 == 0):
+                    # if planet_params['include_planets'] and (n % 5 == 0):
+                    if planet_params['include_planets'] and (n % 100 == 0):
                         k = h5f["t"].shape[0]
                         for name in ["t", "disk_Mdot_star", "disk_Mass", "Tc", "Sigc", "R_dz_t", "sigmaXR"]:
                             h5f[name].resize(k + 1, axis=0)
