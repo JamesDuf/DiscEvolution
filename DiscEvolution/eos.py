@@ -4,6 +4,7 @@ from DiscEvolution.brent import brentq
 from DiscEvolution import opacity
 from DiscEvolution.constants import *
 import time 
+import warnings
 
 ################################################################################
 # Thermodynamics classes
@@ -1333,19 +1334,22 @@ class DeadZoneEOS(IrradiatedEOS):
         Lambda = self._Elsasser(eta, Omega, cs)           # Lambda(R) -> find where it crosses unity
         self._Lambda_prev = Lambda
         # Deadzone mask
-        deadzone = Lambda <= 1.0
+        # deadzone = Lambda <= 1.0
 
-        if deadzone.any() == False:
-            return R[0]                                    # no dead zone at so return Rdz = R_in
+        # if deadzone.any() == False:
+        #     return R[0]                                    # no dead zone at so return Rdz = R_in
 
-        if deadzone.all() == True:
-            Rdz = R[-1]                                     # entire disc is dead so return Rdz = R_out
+        # if deadzone.all() == True:
+        #     return R[-1]                                     # entire disc is dead so return Rdz = R_out
 
         # Rdz = R[deadzone].max()                            # outer edge of dead zone marks Rdz -> this used to cause issues because no interpolation
         
         # As long as Lambda increases monotonically, interpolate directly for Lambda = 1
+        # Rdz = np.interp(1.0, Lambda, R)
+
         # TODO: add monoticity check perhaps
-        Rdz = np.interp(1.0, Lambda, R)
+        Rdz = self._find_deadzone_radius(R, Lambda)         # Check for monotonicity and find the appropriate crossing
+
 
         # Timer diagnostics
         if self._timer:
@@ -1360,6 +1364,113 @@ class DeadZoneEOS(IrradiatedEOS):
                 print(f"[ionization step timer] calls={self._calls} avg={avg_ms:.3f} ms  xe={xe_pct:.1f}%")
 
         return Rdz
+
+    def _find_deadzone_radius(self, R, Lambda):
+        """
+        Identify the dead zone radius by finding all regions where Lambda < 1
+        and selecting the right edge of the deepest deadzone.
+        
+        For a disc with potentially multiple dead zones (due to non-monotonic Lambda),
+        this method identifies all contiguous regions where Lambda < 1, measures
+        the depth of each (min(Lambda)), and returns the outer radius of
+        the deepest region (interpolates to find the exact unity crossing).
+        
+        Parameters
+        ----------
+        R : array
+            Radii (AU)
+        Lambda : array
+            Elsasser number at each radius
+            
+        Returns
+        -------
+        Rdz : float
+            Dead-zone radius (AU) - the right edge of the deepest deadzone
+        """
+        
+        R = np.asarray(R, dtype=float)
+        Lambda = np.asarray(Lambda, dtype=float)
+        
+        # Sort by radius (should already be sorted, but be safe)
+        order = np.argsort(R)
+        R = R[order]
+        Lambda = Lambda[order]
+        
+        # Create a mask for dead zones (Lambda < 1)
+        dead_mask = Lambda < 1.0
+        
+        # Handle edge cases
+        if not np.any(dead_mask):
+            return R[0]  # No dead zone, return inner radius
+        
+        if dead_mask.all():
+            return R[-1]  # Entire disc is dead, return outer radius
+
+        # Find all contiguous deadzone regions by detecting transitions
+        dead_int = dead_mask.astype(int)        # Converts True / False to 1 / 0
+        transitions = np.diff(dead_int)         # Diff between cells: +1 = active -> dead , -1 = dead -> active, 0 no change
+        
+        # Find start and end indices of dead regions
+        dead_starts = np.where(transitions == 1)[0] + 1  # Start (active -> dead)           # +1 because diff gives the trans betw two pts st trans index = 0 means change from idx 0 to 1 -> dz starts at idx 1
+        dead_ends = np.where(transitions == -1)[0]  # End (dead -> active)
+        
+        # Handle boundary cases where disc starts or ends in dead zone
+        if dead_mask[0]:
+            dead_starts = np.insert(dead_starts, 0, 0)
+        if dead_mask[-1]:
+            dead_ends = np.append(dead_ends, len(R) - 1)
+        
+        # Count number of deadzones 
+        n_deadzones = len(dead_starts) 
+        if n_deadzones > 1:
+            ranges = [
+                f"{R[start_idx]:.4f}-{R[end_idx]:.4f} AU"
+                for start_idx, end_idx in zip(dead_starts, dead_ends)
+            ]
+
+            warnings.warn(
+                "Multiple dead zones detected. "
+                f"t = {self._t_current_yr:.4e} yr. "
+                ,
+                RuntimeWarning
+            )                 
+
+        # Find the deepest deadzone (lowest min Lambda)
+        deepest_min_lambda = np.inf
+        deepest_right_idx = None
+        
+        for start_idx, end_idx in zip(dead_starts, dead_ends):          # Loops over each DZ, each has a first dead idx and last dead idx
+            min_lambda = np.min(Lambda[start_idx:end_idx + 1])          # gets all the Lambda values in the DZ and finds the smallest one
+            
+            if min_lambda < deepest_min_lambda:                         # Check if this DZ min Lambda is smaller than the previous one, if so replace it 
+                deepest_min_lambda = min_lambda
+                deepest_right_idx = end_idx
+        
+        # Safety fallback
+        if deepest_right_idx is None:
+            raise RuntimeError("Failed to identify a dead-zone region despite dead_mask containing True values.")
+
+        i = deepest_right_idx
+
+        # If the deepest dead zone reaches the outer boundary,
+        # there is no active point to interpolate to.
+        if i == len(R) - 1:
+            return R[-1]                                            # Prevents out of bounds error
+
+        # Interpolate the crossing Lambda = 1
+        # Right edge should be dead -> active:
+        # Lambda[i] < 1 and Lambda[i+1] >= 1
+        if Lambda[i] < 1.0 and Lambda[i + 1] >= 1.0:                # Check if right edge is a crossing from dead to active (check if dead at i and active at i+1)   
+
+            r_cross = np.interp(                                    
+                1.0,    
+                [Lambda[i], Lambda[i + 1]],
+                [R[i], R[i + 1]]                                    # linearly interpolates to find where Lambda = 1 between the last dead point and the first active point
+            )
+
+            return r_cross                                          # Return interpolated radius 
+
+        raise RuntimeError("Deepest dead-zone right edge was not a valid dead-to-active transition.")
 
     def _compute_R_dz(self, t, Sigma=None, ionization_model=None):
         """
