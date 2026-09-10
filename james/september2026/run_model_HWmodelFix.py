@@ -1161,7 +1161,7 @@ def run_model(config, cli_output_dir=None):
                 h5f["v_r"].resize(s + 1, axis=0)
                 h5f["v_r"][s, :] = vr
 
-                Mdot_r = -2.0 * np.pi * (R_faces * AU) * Sig_faces * vr * (yr / Msun)
+                Mdot_r = -2.0 * np.pi * (R_faces * AU) * Sig_faces * vr * AU * (yr / Msun)
                 h5f["Mdot_r"].resize(s + 1, axis=0)
                 h5f["Mdot_r"][s, :] = Mdot_r
 
