@@ -1347,7 +1347,6 @@ class DeadZoneEOS(IrradiatedEOS):
         # As long as Lambda increases monotonically, interpolate directly for Lambda = 1
         # Rdz = np.interp(1.0, Lambda, R)
 
-        # TODO: add monoticity check perhaps
         Rdz = self._find_deadzone_radius(R, Lambda)         # Check for monotonicity and find the appropriate crossing
 
 
