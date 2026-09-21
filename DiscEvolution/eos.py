@@ -1419,7 +1419,7 @@ class DeadZoneEOS(IrradiatedEOS):
         if dead_mask[-1]:
             dead_ends = np.append(dead_ends, len(R) - 1)
         
-        # Count number of deadzones 
+        # Count number of deadzones #TODO: only output at ETA cadence, save to err file 
         n_deadzones = len(dead_starts) 
         if n_deadzones > 1:
 
