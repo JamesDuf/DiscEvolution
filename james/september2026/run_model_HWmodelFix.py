@@ -123,6 +123,18 @@ def run_model(config, cli_output_dir=None):
     chemistry_params = config["chemistry"]
     planetesimal_params = config['planetesimal']
     wind_params = config["winds"]
+
+    # torque maps saving
+    torque_params = config.get('torque_maps', {})   # defaults to non-saving so that config files without this key won't break
+    save_torque_maps = torque_params.get('save', False)
+    if save_torque_maps:
+        n_mass = torque_params.get('n_mass', 100)
+        mass_array = np.logspace(
+            torque_params.get('log_Mmin', -2),
+            torque_params.get('log_Mmax', 3),
+            n_mass
+        )
+    save_torque_movie = torque_params.get('movie', False)
     
     # Set up disc
     # ========================
@@ -333,6 +345,21 @@ def run_model(config, cli_output_dir=None):
     except Exception as e:
         #disc = DustGrowthTwoPop(grid, star, eos, disc_params['d2g'], Sigma=Sigma, f_ice=dust_growth_params['f_ice'], thresh=dust_growth_params['thresh'])
         raise e
+
+    # Torque map helper (needs disc to exist)
+    if save_torque_maps:
+        def compute_torque_map(disc):
+            """Return (Gamma_L, Gamma_C, Gamma_total) maps, shape (n_mass, nR)."""
+            TypeI = TypeIMigration(disc)
+            radius_array = disc.R
+            GL = np.zeros((len(mass_array), len(radius_array)))         # Lindblad
+            GC = np.zeros_like(GL)                                      # Corotation
+            GT = np.zeros_like(GL)                                      # Total
+            GN = np.zeros_like(GL)                                      # normalization factors
+            for i, Mp in enumerate(mass_array):
+                Mp_arr = np.ones_like(radius_array) * Mp
+                GL[i], GC[i], GT[i], GN[i] = TypeI.compute_torques_HDF5(radius_array, Mp_arr)
+            return GL, GC, GT, GN
     
     
     # Set up Chemistry
@@ -606,6 +633,18 @@ def run_model(config, cli_output_dir=None):
             h5f.create_dataset("Mdot_r", shape=(0, nR_faces), maxshape=(None, nR_faces), dtype="f8")
             h5f.create_dataset("R_faces", data=(grid.Rc[:-1] + grid.Rc[1:]) / 2.0)
 
+            # Torque maps
+            if save_torque_maps:
+                nM = len(mass_array)
+                h5f.create_dataset("torque_mass_array", data=mass_array)
+                h5f.create_dataset("Gamma_L", shape=(0, nM, nR), maxshape=(None, nM, nR), dtype="f8")
+                h5f.create_dataset("Gamma_C", shape=(0, nM, nR), maxshape=(None, nM, nR), dtype="f8")
+                h5f.create_dataset("Gamma_T", shape=(0, nM, nR), maxshape=(None, nM, nR), dtype="f8")
+                h5f.create_dataset("Gamma_N", shape=(0, nM, nR), maxshape=(None, nM, nR), dtype="f8")
+            
+            if save_torque_movie:
+                h5f.create_dataset("time_movie", shape=(0,), maxshape=(None,), dtype="f8")
+
             # ==================================================
             # Initial write at t = 0 (if not already included in tinterval)
             # ==================================================
@@ -704,6 +743,15 @@ def run_model(config, cli_output_dir=None):
                     d = h5f["Sigma_planetesimals"]
                     d.resize(1, axis=0)
                     d[0, :] = disc.Sigma_D[2]
+
+                # Torque maps
+                if save_torque_maps:
+                    GL0, GC0, GT0, GN0 = compute_torque_map(disc)
+                    h5f["Gamma_L"].resize(1, axis=0);     h5f["Gamma_L"][0, :, :]     = GL0
+                    h5f["Gamma_C"].resize(1, axis=0);     h5f["Gamma_C"][0, :, :]     = GC0
+                    h5f["Gamma_T"].resize(1, axis=0);     h5f["Gamma_T"][0, :, :]     = GT0
+                    h5f["Gamma_N"].resize(1, axis=0);     h5f["Gamma_N"][0, :, :]     = GN0
+
                 # Time array
                 h5f["time_snap"].resize(1, axis=0)
                 h5f["time_snap"][0] = 0.0  # Myr
@@ -1073,6 +1121,19 @@ def run_model(config, cli_output_dir=None):
                         h5f["C_xe"][k, :] = C_xe
                         h5f["D_xe"][k, :] = D_xe
 
+                        # Torque map movie data
+                        if save_torque_movie:
+                            GL, GC, GT, GN = compute_torque_map(disc)
+                            k_torque = h5f["Gamma_L"].shape[0]
+                            h5f["Gamma_L"].resize(k_torque + 1, axis=0)
+                            h5f["Gamma_C"].resize(k_torque + 1, axis=0)
+                            h5f["Gamma_T"].resize(k_torque + 1, axis=0)
+                            h5f["Gamma_N"].resize(k_torque + 1, axis=0)
+                            h5f["Gamma_L"][k_torque, :, :]  = GL
+                            h5f["Gamma_C"][k_torque, :, :]  = GC
+                            h5f["Gamma_T"][k_torque, :, :]  = GT
+                            h5f["Gamma_N"][k_torque, :, :]  = GN
+
                         for ip, planet in enumerate(planets):
                             for name, val, grp in [
                                 ("Mcs", planet.M_core.copy(), grp_Mcs),
@@ -1164,6 +1225,14 @@ def run_model(config, cli_output_dir=None):
                 Mdot_r = -2.0 * np.pi * (R_faces * AU) * Sig_faces * vr * AU * (yr / Msun)
                 h5f["Mdot_r"].resize(s + 1, axis=0)
                 h5f["Mdot_r"][s, :] = Mdot_r
+
+                # Torque Maps
+                if save_torque_maps:
+                    GL, GC, GT, GN = compute_torque_map(disc)
+                    h5f["Gamma_L"].resize(s + 1, axis=0);     h5f["Gamma_L"][s, :, :]     = GL
+                    h5f["Gamma_C"].resize(s + 1, axis=0);     h5f["Gamma_C"][s, :, :]     = GC
+                    h5f["Gamma_T"].resize(s + 1, axis=0);     h5f["Gamma_T"][s, :, :]     = GT
+                    h5f["Gamma_N"].resize(s + 1, axis=0);     h5f["Gamma_N"][s, :, :]     = GN
 
                 h5f.flush()
 
