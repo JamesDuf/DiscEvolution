@@ -1422,10 +1422,6 @@ class DeadZoneEOS(IrradiatedEOS):
         # Count number of deadzones 
         n_deadzones = len(dead_starts) 
         if n_deadzones > 1:
-            ranges = [
-                f"{R[start_idx]:.4f}-{R[end_idx]:.4f} AU"
-                for start_idx, end_idx in zip(dead_starts, dead_ends)
-            ]
 
             warnings.warn(
                 "Multiple dead zones detected. "
