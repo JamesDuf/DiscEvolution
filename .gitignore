@@ -17,3 +17,7 @@ Figs/
 BACKUP
 *.pkl
 .venv
+james/september2026/MiniGrowthTracks/DiscAnalysis_MiniGrowthTracks.ipynb
+james/september2026/MiniPopSynth/DiscAnalysis_MiniPopSynth.ipynb
+james/september2026/MiniGrowthTracks/*.gif
+james/september2026/MiniPopSynth/*.gif
