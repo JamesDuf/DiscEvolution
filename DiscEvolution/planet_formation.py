@@ -1166,22 +1166,15 @@ class TypeIMigration(object):
         Sigma = disc.interp(Rp, disc.Sigma)
         nu_SS = disc.interp(Rp, disc.nu)
 
-        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
-        # psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
         psi_data = np.asarray(disc._gas._psi)           # Line above was not working for a zero-dim np array
         if psi_data.ndim == 0:                          #
             psi = float(psi_data)                       #
         else:                                           #
             psi = disc.interp(Rp, psi_data)             # This block was used to do what the line above intented to do
-        #nu  = disc.interp(Rp, disc.nu) * (1 + psi)
-        nu = disc.interp(Rp, disc.nu) * (1 + psi)
 
         Pr    = disc.interp(Rp, disc.Pr)
-
         Om_k = star.Omega_k(Rp)
-        
-        #Xi = nu/Pr
-        Xi = (nu / Pr) * (1 + psi/3.0)
+        Xi = (nu_SS / Pr) * (1 + psi/3.0)                              
 
         Q = 2*Xi/(3*h*h*h*Rp*Rp*Om_k)
         g_eff = self.gamma_eff_tab(Q)
