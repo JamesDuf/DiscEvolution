@@ -1174,7 +1174,7 @@ class TypeIMigration(object):
 
         Pr    = disc.interp(Rp, disc.Pr)
         Om_k = star.Omega_k(Rp)
-        Xi = (nu_SS / Pr) * (1 + psi/3.0)                              
+        Xi = (nu_SS / Pr) * (1 + psi/3.0)
 
         Q = 2*Xi/(3*h*h*h*Rp*Rp*Om_k)
         g_eff = self.gamma_eff_tab(Q)
