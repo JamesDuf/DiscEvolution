@@ -41,7 +41,7 @@
         "t0": null,
         "t1": null,
         "alpha_SS_dead": 1e-5,
-        "alpha_SS_active": 1e-3,    
+        "alpha_SS_active": -1,    
         "w": 1.0,
         "warm_start": true,
         "psi_dead": 25.330280977823254
