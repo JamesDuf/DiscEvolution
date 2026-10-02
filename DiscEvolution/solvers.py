@@ -148,7 +148,7 @@ def psi_from_alphaSS_Mdot(eos, disc, wind_model, Mdot_target, guess = None, max_
     return psi
 
 
-def psi_from_alpha_SS_Mdot_RootFinder(eos, disc, wind_model, Mdot_target, psi_space = np.logspace(-4, 3, num=100), verbose=False):
+def psi_from_alpha_SS_Mdot_RootFinder(eos, disc, wind_model, Mdot_target, psi_space = np.logspace(-4, 4, num=100), verbose=False):
     """
     Solve for psi at fixed alphaSS such that F(psi) = Mdot_target - Mdot(psi) = 0
 
