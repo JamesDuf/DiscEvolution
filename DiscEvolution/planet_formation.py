@@ -1212,6 +1212,7 @@ class TypeIMigration(object):
         Gamma_L, Gamma_C, torque -> Dimensionless, 
         To get the actual torque in physical units, multiply the dimensionless coefficients by norm
         """
+        """Compute the torques acting on a planet driving Type I migration"""
         disc = self._disc
         star = disc.star
         
@@ -1219,21 +1220,20 @@ class TypeIMigration(object):
         lgR = np.log(Rp)
         alpha = -self._dlgSig(lgR)
         beta  = -self._dlgT(lgR)
+
         h     = disc.interp(Rp, disc.H) / Rp
         Sigma = disc.interp(Rp, disc.Sigma)
         nu_SS = disc.interp(Rp, disc.nu)
 
-        #nu    = disc.interp(Rp, disc.nu) * (1 + disc._gas._psi)
-        psi = disc.interp(Rp, disc._gas._psi) if hasattr(disc._gas._psi, '__len__') else disc._gas._psi  # will work for array psi or scalar psi
-        #nu  = disc.interp(Rp, disc.nu) * (1 + psi)
-        nu = disc.interp(Rp, disc.nu) * (1 + psi)
+        psi_data = np.asarray(disc._gas._psi)           # Line above was not working for a zero-dim np array
+        if psi_data.ndim == 0:                          #
+            psi = float(psi_data)                       #
+        else:                                           #
+            psi = disc.interp(Rp, psi_data)             # This block was used to do what the line above intented to do
 
         Pr    = disc.interp(Rp, disc.Pr)
-
         Om_k = star.Omega_k(Rp)
-        
-        #Xi = nu/Pr
-        Xi = (nu / Pr) * (1 + psi/3.0)
+        Xi = (nu_SS / Pr) * (1 + psi/3.0)
 
         Q = 2*Xi/(3*h*h*h*Rp*Rp*Om_k)
         g_eff = self.gamma_eff_tab(Q)
@@ -1253,7 +1253,6 @@ class TypeIMigration(object):
         x = (1.1 / g_eff**0.25) * np.sqrt(q_h)
 
         pnu = 2*np.sqrt(k*x*x*x)/3
-        #pXi = 3*pnu*np.sqrt(Pr)/2
         pXi  = 2*np.sqrt(kXi * x*x*x) / 3
 
         Fnu, Gnu, Knu = _F(pnu), _G(pnu), _K(pnu)
