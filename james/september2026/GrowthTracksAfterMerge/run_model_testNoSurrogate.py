@@ -327,6 +327,64 @@ def run_model(config, cli_output_dir=None):
             psi_safe = np.clip(psi_profile, 1e-8, None)         # safe for division by zero
             lambda_DW = 1.0 / ( 2.0*(1.0 - e_rad)*(3.0/psi_safe + 1.0) ) + 1.0
 
+        if eos_params["type"] == "IrradiatedEOS":
+            alpha_dead = eos_params["alpha_SS_dead"]
+
+            eos = IrradiatedEOS(
+                star,
+                alpha_t=alpha_dead, 
+                kappa=kappa, 
+                psi=psi_boot, 
+                e_rad=e_rad, 
+                Tmax=eos_params["Tmax"],
+            )
+            eos.set_grid(grid)
+            eos.update(0, Sigma)
+
+            # Rebuild disc so it actually points at the new DeadZoneEOS
+            # (alpha_SS_dead), not the stale surrogate IrradiatedEOS.
+            disc = AccretionDisc(grid, star, eos, Sigma)
+
+            # Fresh wind model for the solver — psi here is just an initial
+            # guess; the solver should be varying it, not gas_temp's psi
+            # left over from the bootstrap.
+            gas_dead = HybridWindModel(psi_boot, lambda_DW_boot)
+
+            psi_dead = psi_from_alpha_SS_Mdot_RootFinder(
+                eos, 
+                disc, 
+                gas_dead, 
+                Mdot,
+                # psi_space = np.logspace(-4, 2, num=1000),
+                # verbose=True
+            )
+            # print(psi_dead)
+
+            # Rebuild the EOS using exactly the dead-zone inner-region values
+            eos = IrradiatedEOS(
+                star,
+                alpha_t=alpha_dead,
+                kappa=kappa,
+                psi=psi_dead,
+                e_rad=e_rad,
+                Tmax=eos_params["Tmax"],
+            )
+            eos.set_grid(grid)
+            eos.update(0, Sigma)
+
+            disc = AccretionDisc(grid, star, eos, Sigma)
+
+            psi_profile = np.full_like(grid.Rc, psi_dead, dtype=float)
+            lambda_DW = 1.0 + 1.0 / (
+                2.0 * (1.0 - e_rad) * (3.0 / psi_profile + 1.0)
+            )
+                        
+            # Not used but needed for HDF5 saving not to crash
+            alpha_SS_dead = eos_params["alpha_SS_dead"]
+            alpha_SS_active = alpha_SS_dead
+            psi_active = psi_dead
+            alpha_DW = psi_dead * alpha_SS_dead
+
     # Removed other solvers for simplicity 
 
     # Set up dynamics
