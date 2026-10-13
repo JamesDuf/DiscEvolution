@@ -24,7 +24,7 @@ def main():
         template = deepcopy(base)
         template["eos"].update(type=eos_type, alpha_SS_dead=1e-5,
                                alpha_SS_active=1e-3 if label == "DZ" else 1e-5)
-        template["planets"].update(Rp=PLANET_RADII, Mp=[0.1] * len(PLANET_RADII),
+        template["planets"].update(Rp=PLANET_RADII, Mp=[0.01] * len(PLANET_RADII),
                                    implant_time=[0.0] * len(PLANET_RADII))
         if label == "Irradiated":
             write_json(HERE / "Irradiated_config.json", template)
