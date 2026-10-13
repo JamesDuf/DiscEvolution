@@ -9,7 +9,7 @@ MASSES = [0.05, 0.075, 0.1, 0.125, 0.15]
 ACCRETION_RATES = [1e-8, 3e-8, 1e-7, 3e-7, 1e-6, 3e-6]
 RADII = [50, 100, 150, 200]
 # Integer construction avoids accumulated floating-point rounding errors.
-PLANET_RADII = [i / 10 for i in range(2, 21)] + list(range(3, 11)) + list(range(15, 51, 5))
+PLANET_RADII = [i / 10 for i in range(2, 11)] + [1.5, 2.0] + list(range(3, 11)) + list(range(15, 51, 5))
 
 
 def write_json(path, value):
