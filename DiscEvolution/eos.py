@@ -604,6 +604,7 @@ class DeadZoneEOS(IrradiatedEOS):
         
         # Will be computed correctly each time update() is called
         self._R_dz = None
+        self._warned_multiple_deadzones = False
         
         # Track absolute time in years
         self._t_current_yr = t_initial_yr
@@ -1373,6 +1374,11 @@ class DeadZoneEOS(IrradiatedEOS):
         this method identifies all contiguous regions where Lambda < 1, measures
         the depth of each (min(Lambda)), and returns the outer radius of
         the deepest region (interpolates to find the exact unity crossing).
+
+        Warn once per EOS instance if a secondary region has at least half
+        the main region's logarithmic depth below unity, -log10(min(Lambda)).
+        Nonpositive minima are floored at the smallest positive normal float
+        for this diagnostic only; region selection is unchanged.
         
         Parameters
         ----------
@@ -1419,23 +1425,14 @@ class DeadZoneEOS(IrradiatedEOS):
         if dead_mask[-1]:
             dead_ends = np.append(dead_ends, len(R) - 1)
         
-        # Count number of deadzones #TODO: only output at ETA cadence, save to err file 
-        n_deadzones = len(dead_starts) 
-        if n_deadzones > 1:
-
-            warnings.warn(
-                "Multiple dead zones detected. "
-                f"t = {self._t_current_yr:.4e} yr. "
-                ,
-                RuntimeWarning
-            )                 
-
         # Find the deepest deadzone (lowest min Lambda)
         deepest_min_lambda = np.inf
         deepest_right_idx = None
+        region_minima = []
         
         for start_idx, end_idx in zip(dead_starts, dead_ends):          # Loops over each DZ, each has a first dead idx and last dead idx
             min_lambda = np.min(Lambda[start_idx:end_idx + 1])          # gets all the Lambda values in the DZ and finds the smallest one
+            region_minima.append(min_lambda)
             
             if min_lambda < deepest_min_lambda:                         # Check if this DZ min Lambda is smaller than the previous one, if so replace it 
                 deepest_min_lambda = min_lambda
@@ -1444,6 +1441,19 @@ class DeadZoneEOS(IrradiatedEOS):
         # Safety fallback
         if deepest_right_idx is None:
             raise RuntimeError("Failed to identify a dead-zone region despite dead_mask containing True values.")
+
+        if len(region_minima) > 1 and not self._warned_multiple_deadzones:
+            depths = -np.log10(np.maximum(region_minima, np.finfo(float).tiny))
+            ranked_depths = np.sort(depths)
+            if ranked_depths[-2] >= 0.5 * ranked_depths[-1]:
+                warnings.warn(
+                    "Multiple significant dead zones detected: secondary "
+                    f"logarithmic depth is {ranked_depths[-2] / ranked_depths[-1]:.1%} "
+                    f"of the main zone at t = {self._t_current_yr:.4e} yr. "
+                    "Further multiple-dead-zone warnings are suppressed for this EOS instance.",
+                    RuntimeWarning,
+                )
+                self._warned_multiple_deadzones = True
 
         i = deepest_right_idx
 
@@ -1828,5 +1838,3 @@ if __name__ == "__main__":
         Sigma /= 10
     plt.legend()
     plt.show()
-    
-                    
