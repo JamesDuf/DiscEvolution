@@ -148,7 +148,7 @@ def psi_from_alphaSS_Mdot(eos, disc, wind_model, Mdot_target, guess = None, max_
     return psi
 
 
-def psi_from_alpha_SS_Mdot_RootFinder(eos, disc, wind_model, Mdot_target, psi_space = np.logspace(-4, 4, num=100), verbose=False):
+def psi_from_alpha_SS_Mdot_RootFinder(eos, disc, wind_model, Mdot_target, psi_space = np.logspace(-8, 8, num=100), verbose=False):
     """
     Solve for psi at fixed alphaSS such that F(psi) = Mdot_target - Mdot(psi) = 0
 
@@ -158,7 +158,8 @@ def psi_from_alpha_SS_Mdot_RootFinder(eos, disc, wind_model, Mdot_target, psi_sp
     Mdot_target : float
         Target accretion rate (Msun/yr)
     psi_space : ndarray
-        Monotonically increasing grid of psi values used to bracket the root
+        Monotonically increasing grid of psi values used to bracket the root.
+        Defaults to 100 logarithmically spaced values from 1e-8 to 1e8.
     xtol : float
         Absolute tolerance on psi passed to brentq
 
