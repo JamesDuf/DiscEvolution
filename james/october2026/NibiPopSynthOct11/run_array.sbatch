@@ -7,8 +7,8 @@
 #SBATCH --mem=16G
 #SBATCH --time=24:00:00
 #SBATCH --array=0-239%120
-#SBATCH --output=/project/def-mbalogh/jdufr/output/logs/%A_%a.out
-#SBATCH --error=/project/def-mbalogh/jdufr/output/logs/%A_%a.err
+#SBATCH --output=/project/def-mbalogh/jdufr/output_gamma1.0_t1.0Myr/logs/%A_%a.out
+#SBATCH --error=/project/def-mbalogh/jdufr/output_gamma1.0_t1.0Myr/logs/%A_%a.err
 
 set -eo pipefail
 module load python/3.11
@@ -27,7 +27,7 @@ if [[ -z "$config" || ! -f "$config" ]]; then
 fi
 tag=$(basename "$config" .json)
 # Every submission gets a separate directory, including retries.
-output_root="/project/def-mbalogh/jdufr/output"
+output_root="/project/def-mbalogh/jdufr/output_gamma1.0_t1.0Myr"
 output="${output_root}/${tag}/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "$output"
 cp "$config" "$output/config.json"
