@@ -7,8 +7,8 @@
 #SBATCH --mem=16G
 #SBATCH --time=24:00:00
 #SBATCH --array=0-239%120
-#SBATCH --output=/project/def-mbalogh/jdufr/output_gamma1.0_t3.0Myr_scipy1.16.3/logs/%A_%a.out
-#SBATCH --error=/project/def-mbalogh/jdufr/output_gamma1.0_t3.0Myr_scipy1.16.3/logs/%A_%a.err
+#SBATCH --output=/project/def-mbalogh/jdufr/output_gamma1.0_t3.0Myr_scipy1.16.2/logs/%A_%a.out
+#SBATCH --error=/project/def-mbalogh/jdufr/output_gamma1.0_t3.0Myr_scipy1.16.2/logs/%A_%a.err
 
 set -eo pipefail
 module load python/3.11
@@ -17,8 +17,8 @@ set -u
 python - <<'PYTHON'
 import scipy
 print(f"SciPy version: {scipy.__version__}", flush=True)
-if scipy.__version__.split("+")[0] != "1.16.3":
-    raise SystemExit("This batch requires scipy==1.16.3 in discevolution-env")
+if scipy.__version__.split("+")[0] != "1.16.2":
+    raise SystemExit("This batch requires scipy==1.16.2 in discevolution-env")
 PYTHON
 cd "${SLURM_SUBMIT_DIR}"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
@@ -33,7 +33,7 @@ if [[ -z "$config" || ! -f "$config" ]]; then
 fi
 tag=$(basename "$config" .json)
 # Every submission gets a separate directory, including retries.
-output_root="/project/def-mbalogh/jdufr/output_gamma1.0_t3.0Myr_scipy1.16.3"
+output_root="/project/def-mbalogh/jdufr/output_gamma1.0_t3.0Myr_scipy1.16.2"
 output="${output_root}/${tag}/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "$output"
 cp "$config" "$output/config.json"
