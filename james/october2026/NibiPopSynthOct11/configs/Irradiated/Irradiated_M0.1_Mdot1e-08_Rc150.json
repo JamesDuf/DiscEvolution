@@ -14,7 +14,7 @@
     },
     "simulation": {
         "t_initial": 0,
-        "t_final": 1000000.0,
+        "t_final": 3000000.0,
         "t_interval": [
             0,
             0.005,
@@ -27,7 +27,15 @@
             0.7,
             0.8,
             0.9,
-            1.0
+            1.0,
+            1.25,
+            1.5,
+            1.75,
+            2.0,
+            2.25,
+            2.5,
+            2.75,
+            3.0
         ],
         "eta_abort_hours": 4,
         "output_dir": "output/Irradiated_M0.1_Mdot1e-08_Rc150",
